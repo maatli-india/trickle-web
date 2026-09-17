@@ -57,6 +57,10 @@ export const logoutWebSession = async () => {
   }
 };
 
+export const generateDeleteAccountOtp = () => apiRequest("/v1/auth/delete-account/otp", { method: "POST" });
+
+export const deleteAccount = (otp: string) => apiRequest("/v1/users/me", { method: "DELETE", body: JSON.stringify({ otp }) });
+
 type TokenPair = { accessToken: string; refreshToken?: string };
 
 type AuthResponse = {

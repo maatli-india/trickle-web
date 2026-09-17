@@ -146,9 +146,9 @@ export default function TravellerDetailsPage() {
     0;
 
   return (
-    <div className="min-h-screen bg-[#f6f2eb] text-[#1b1d1c]">
+    <div className="flex min-h-screen flex-col bg-[#f6f2eb] text-[#1b1d1c]">
       <SiteHeader />
-      <main className="mx-auto max-w-4xl px-5 pb-32 sm:px-8">
+      <main className="mx-auto max-w-4xl flex-1 px-5 pb-32 sm:px-8">
         <button
           type="button"
           onClick={() => router.back()}

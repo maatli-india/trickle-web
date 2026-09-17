@@ -128,7 +128,7 @@ export default function TermsPage() {
       </LegalSection>
 
       <LegalSection id="contact" title="14. Contact and complaints">
-        <p>For questions, complaints, account deletion, safety concerns, or disputes, contact <a className="font-semibold text-[#e85b43] underline" href="mailto:hello@trickle.app">hello@trickle.app</a>. Include the relevant request, match, or payment reference, but never include an OTP or password.</p>
+        <p>For questions, complaints, account deletion, safety concerns, or disputes, contact <a className="font-semibold text-[#e85b43] underline" href="mailto:support@trickle.org.in">support@trickle.org.in</a>. Include the relevant request, match, or payment reference, but never include an OTP or password.</p>
       </LegalSection>
     </LegalPage>
   );

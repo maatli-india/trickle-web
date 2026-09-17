@@ -6,9 +6,9 @@ import { SiteHeader } from "@/components/layout/site-header";
 
 export function AccountPage({ eyebrow = "Your Trickle account", title, description, children }: { eyebrow?: string; title: string; description: string; children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f6f2eb] text-[#1b1d1c]">
+    <div className="flex min-h-screen flex-col bg-[#f6f2eb] text-[#1b1d1c]">
       <SiteHeader />
-      <main className="mx-auto w-full max-w-5xl px-5 pb-32 sm:px-8">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-5 pb-32 sm:px-8">
         <section className="border-b border-[#ded8ce] py-12 sm:py-16">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#e85b43]">{eyebrow}</p>
           <h1 className="mt-3 max-w-3xl text-4xl font-semibold leading-tight tracking-[-0.05em] sm:text-6xl">{title}</h1>

@@ -13,10 +13,10 @@ type LegalPageProps = {
 
 export function LegalPage({ title, eyebrow, updated, intro, sections, children }: LegalPageProps) {
   return (
-    <div className="min-h-screen bg-[#f6f2eb] text-[#1b1d1c]">
+    <div className="flex min-h-screen flex-col bg-[#f6f2eb] text-[#1b1d1c]">
       <SiteHeader />
 
-      <main className="mx-auto grid max-w-6xl gap-10 px-5 py-12 sm:px-8 sm:py-16 lg:grid-cols-[190px_1fr] lg:gap-16">
+      <main className="mx-auto grid w-full max-w-6xl flex-1 gap-10 px-5 py-12 sm:px-8 sm:py-16 lg:grid-cols-[190px_1fr] lg:gap-16">
         <aside className="lg:sticky lg:top-8 lg:self-start">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e85b43]">Legal</p>
           <nav className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-[#62645f] lg:block" aria-label="On this page">

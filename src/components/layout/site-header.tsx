@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getWebProfile, hasAccessToken, logoutWebSession } from "@/services/auth";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 const subscribe = () => () => {};
 
@@ -28,13 +29,11 @@ const getDisplayName = (profileValue: string | null) => {
   }
 };
 
-const menuItems = [
-  { label: "Account Settings", href: "/account/settings" },
-  { label: "Travel History", href: "/account/travel-history" },
-  { label: "Delivery History", href: "/account/delivery-history" },
-  { label: "Payments", href: "/account/payments" },
-  { label: "About App", href: "/about" },
-  { label: "Support", href: "/support" },
+const primaryNavItems = [
+  { label: "Home", href: "/" },
+  { label: "Requests", href: "/requests" },
+  { label: "Plans", href: "/plans" },
+  { label: "Settings", href: "/settings" },
 ];
 
 export function SiteHeader() {
@@ -43,11 +42,11 @@ export function SiteHeader() {
   const authenticated = useSyncExternalStore(subscribe, hasAccessToken, () => false);
   const profileValue = useSyncExternalStore(subscribe, getWebProfile, () => null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const displayName = getDisplayName(profileValue);
 
   const logout = async () => {
-    if (!window.confirm("Are you sure you want to log out?")) return;
     setLoggingOut(true);
     try {
       await logoutWebSession();
@@ -60,7 +59,7 @@ export function SiteHeader() {
 
   return (
     <header className="border-b border-[#ded8ce] bg-[#fbfaf7]/90 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8">
         <Link href="/" className="flex items-center gap-3" aria-label="Trickle home">
           <span className="grid size-9 place-items-center rounded-xl bg-[#e85b43] text-lg font-bold text-white">T</span>
           <span className="text-xl font-semibold tracking-[-0.03em]">trickle</span>
@@ -72,7 +71,7 @@ export function SiteHeader() {
                 ["About us", "/about"],
                 ["Blog", "/blog"],
                 ["Support", "/support"],
-                ["Contact us", "mailto:hello@trickle.app"],
+                ["Contact us", "mailto:support@trickle.org.in"],
                 ["Privacy policy", "/privacy"],
                 ["Terms", "/terms"],
                 ["FAQs", "/faqs"],
@@ -81,6 +80,24 @@ export function SiteHeader() {
             ) : (
               <Link key={label} className={`transition ${pathname === href ? "font-semibold text-[#e85b43] underline decoration-2 underline-offset-4" : "hover:text-[#e85b43]"}`} href={href}>{label}</Link>
             ))}
+          </nav>
+        )}
+        {authenticated && (
+          <nav className="order-3 flex basis-full items-center gap-1 overflow-x-auto rounded-full bg-[#f0ece3] p-1 sm:order-none sm:basis-auto sm:justify-start" aria-label="Primary navigation">
+            {primaryNavItems.map((item) => {
+              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-semibold transition sm:px-4 ${
+                    active ? "bg-[#e85b43] text-white" : "text-[#183b3a] hover:bg-white"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
         )}
         {authenticated ? (
@@ -102,15 +119,24 @@ export function SiteHeader() {
               <p className="mt-4 text-lg font-semibold">{displayName}</p>
               <p className="mt-1 text-sm text-[#c5d4ce]">User Account</p>
             </div>
-            <nav className="flex-1 bg-[#f6f2eb] px-7 py-4" aria-label="Account menu options">
-                {menuItems.map((item) => (
-                  <a href={item.href} key={item.label} onClick={() => setMenuOpen(false)} className="block w-full border-b border-[#ded8ce] py-4 text-left text-sm font-semibold text-[#183b3a] transition hover:text-[#e85b43]">{item.label}</a>
-              ))}
-            </nav>
-            <button type="button" onClick={logout} disabled={loggingOut} className="border-t border-[#ded8ce] bg-[#fbfaf7] px-7 py-5 text-left text-sm font-semibold text-[#e85b43] disabled:opacity-60">{loggingOut ? "Logging out..." : "Logout"}</button>
+            <div className="flex-1 bg-[#f6f2eb]" />
+            <button type="button" onClick={() => setLogoutConfirmOpen(true)} disabled={loggingOut} className="border-t border-[#ded8ce] bg-[#fbfaf7] px-7 py-5 text-left text-sm font-semibold text-[#e85b43] disabled:opacity-60">{loggingOut ? "Logging out..." : "Logout"}</button>
           </aside>
         </div>
       )}
+      <ConfirmModal
+        open={logoutConfirmOpen}
+        title="Log out of Trickle?"
+        message="You'll need to verify your phone number again to sign back in."
+        confirmLabel={loggingOut ? "Logging out..." : "Log out"}
+        destructive
+        loading={loggingOut}
+        onCancel={() => setLogoutConfirmOpen(false)}
+        onConfirm={() => {
+          setLogoutConfirmOpen(false);
+          logout();
+        }}
+      />
     </header>
   );
 }

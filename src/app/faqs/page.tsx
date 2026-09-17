@@ -19,7 +19,7 @@ const sections = [
   { title: "Safety and support", questions: [
     ["How are pickup details shared?", "Your parcel notes and route details are shared with the traveller when you send a pickup request. Use a clear, public handoff location and confirm the parcel description at pickup."],
     ["What should I do if a plan changes?", "Contact the other participant promptly and keep the agreed route and timing clear. For a serious issue, contact Trickle support with the relevant request, trip, or match reference."],
-    ["How can I contact support?", "Email hello@trickle.app with the relevant request, trip, payment, or handoff details. Never send an OTP, password, or other secret credential."],
+    ["How can I contact support?", "Email support@trickle.org.in with the relevant request, trip, payment, or handoff details. Never send an OTP, password, or other secret credential."],
   ]},
 ];
 
