@@ -57,7 +57,7 @@ export const initiateHandoff = (matchId: string) =>
   });
 
 export const confirmHandoff = (matchId: string, otp: string) =>
-  apiRequest(`/v1/parcel-matches/${encodeURIComponent(matchId)}/handoff/confirm`, {
+  apiRequest<ParcelMatch | { match?: ParcelMatch; data?: ParcelMatch }>(`/v1/parcel-matches/${encodeURIComponent(matchId)}/handoff/confirm`, {
     method: "POST",
     body: JSON.stringify({ otp }),
   });
@@ -92,17 +92,36 @@ export const withdrawCounterOffer = (matchId: string, negotiationId: string, nex
 export const flagParcelDispute = (matchId: string, reason: string) =>
   apiRequest(`/v1/parcel-matches/${encodeURIComponent(matchId)}/dispute`, { method: "POST", body: JSON.stringify({ reason }) });
 
-// Payments — real order is created (so a server-side record exists), but web
-// does not yet complete a real PayU checkout (phase 1 scope decision).
-export const createPaymentOrder = (matchId: string) =>
-  apiRequest<{
-    transactionId?: string;
-    amount?: number;
-    currency?: string;
-    isProduction?: boolean;
-  }>("/v1/payments/orders", {
+// Payments — web completes a real PayU hosted-checkout redirect (see
+// /payment/result and requests/[id] "Pay now"). Backend echoes the payer's
+// firstName/email/phone here so the values submitted to PayU exactly match
+// what the server signed into the hash (any drift breaks PayU's hash check).
+export type PaymentOrder = {
+  transactionId: string;
+  amount: string;
+  currency: string;
+  gateway: string;
+  merchantKey: string;
+  productInfo: string;
+  surl: string;
+  furl: string;
+  isProduction: boolean;
+  checkoutUrl?: string;
+  email: string;
+  firstName: string;
+  phone: string;
+};
+
+export const createPaymentOrder = (matchId: string, client: "web" | "app" = "web") =>
+  apiRequest<PaymentOrder>("/v1/payments/orders", {
     method: "POST",
-    body: JSON.stringify({ entityType: "parcel-match", entityId: matchId }),
+    body: JSON.stringify({ entityType: "parcel-match", entityId: matchId, client }),
+  });
+
+export const signCheckoutHash = (transactionId: string, name: "hosted_checkout_hash" | "payment_hash" = "hosted_checkout_hash") =>
+  apiRequest<{ hash: string; hashName: string }>("/v1/payments/hashes", {
+    method: "POST",
+    body: JSON.stringify({ transactionId, name }),
   });
 
 export const abandonPaymentOrder = (transactionId: string) =>

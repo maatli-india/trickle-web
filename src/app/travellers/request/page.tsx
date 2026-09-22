@@ -63,8 +63,8 @@ export default function TravellerRequestPage() {
 
   const [category, setCategory] = useState("documents");
   const [description, setDescription] = useState("");
-  const [weight, setWeight] = useState(1);
-  const [packageCount, setPackageCount] = useState(1);
+  const [weight, setWeight] = useState("1");
+  const [packageCount, setPackageCount] = useState("1");
   const [pickup, setPickup] = useState<string | null>(null);
   const [pickupNote, setPickupNote] = useState("");
   const [delivery, setDelivery] = useState<string | null>(null);
@@ -81,7 +81,7 @@ export default function TravellerRequestPage() {
           const parsed = JSON.parse(saved) as Selection;
           setSelection(parsed);
           setDescription(parsed.parcelNotes || "");
-          setWeight(Math.min(1, Number(parsed.traveller.maxWeightKg) || 1));
+          setWeight(String(Math.min(1, Number(parsed.traveller.maxWeightKg) || 1)));
           setAmount(String(parsed.traveller.pricePerPackage || parsed.traveller.price || ""));
           setAcceptingNewRequests(parsed.traveller.acceptingNewRequests !== false);
         }
@@ -178,6 +178,8 @@ export default function TravellerRequestPage() {
   const maxWeight = traveller.maxWeightKg || 20;
   const maxPackages = traveller.maxParcelCount || 5;
   const tripClosed = !acceptingNewRequests;
+  const numericWeight = Number(weight);
+  const numericPackageCount = Number(packageCount);
 
   const openDeclaration = async () => {
     setError("");
@@ -207,6 +209,14 @@ export default function TravellerRequestPage() {
     }
     if (!Number(amount) || Number(amount) <= 0) {
       setError("Enter an amount for the traveller.");
+      return;
+    }
+    if (!Number.isFinite(numericWeight) || numericWeight < 0.1 || numericWeight > maxWeight) {
+      setError(`Weight must be between 0.1 and ${maxWeight} kg.`);
+      return;
+    }
+    if (!Number.isInteger(numericPackageCount) || numericPackageCount < 1 || numericPackageCount > maxPackages) {
+      setError(`Package count must be between 1 and ${maxPackages}.`);
       return;
     }
     try {
@@ -252,8 +262,8 @@ export default function TravellerRequestPage() {
           to: { address: to.address, lat: Number(to.lat), lng: Number(to.lng) },
           targetDeliveryTime: pickupDate,
           parcelDescription: description.trim() || category,
-          estimatedWeightKg: weight,
-          packageCount,
+          estimatedWeightKg: numericWeight,
+          packageCount: Math.max(1, numericPackageCount),
           pickupOption: pickup,
           pickupNote: pickupNote || undefined,
           deliveryOption: delivery,
@@ -395,11 +405,28 @@ export default function TravellerRequestPage() {
                 <div className="grid gap-5 sm:grid-cols-2">
                   <label className={labelClass}>
                     Weight (kg)
-                    <input type="number" min={0.1} max={maxWeight} step={0.5} value={weight} onChange={(event) => setWeight(Number(event.target.value))} className={inputClass} />
+                    <input type="number" min={0.1} max={maxWeight} step="any" value={weight} onChange={(event) => setWeight(event.target.value)} className={inputClass} />
                   </label>
                   <label className={labelClass}>
                     Package count
-                    <input type="number" min={1} max={maxPackages} step={1} value={packageCount} onChange={(event) => setPackageCount(Number(event.target.value))} className={inputClass} />
+                    <span className="ml-2 text-xs font-normal text-[#8a8579]">1 to {maxPackages}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={maxPackages}
+                      step={1}
+                      value={packageCount}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (value === "") {
+                          setPackageCount("1");
+                          return;
+                        }
+                        const nextCount = Number(value);
+                        setPackageCount(Number.isInteger(nextCount) && nextCount >= 1 ? String(nextCount) : "1");
+                      }}
+                      className={inputClass}
+                    />
                   </label>
                 </div>
 

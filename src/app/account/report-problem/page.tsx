@@ -40,31 +40,36 @@ export default function ReportProblemPage() {
 
   return (
     <AccountPage title="Report a problem" description="Tell us about a safety concern, fraud, a payment issue, or anything else that went wrong.">
-      <form onSubmit={submit} className="max-w-2xl space-y-5 border-t-2 border-[#e85b43] bg-[#fbfaf7] p-6 sm:p-8">
-        <label className="block text-sm font-semibold text-[#183b3a]">
-          Category
-          <select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]">
-            {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
-        </label>
-        <label className="block text-sm font-semibold text-[#183b3a]">
-          What happened?
-          <textarea
-            required
-            rows={5}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Include the relevant request or trip details, what happened, and when."
-            className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
-          />
-        </label>
-        <label className="flex items-center gap-3 text-sm text-[#62645f]">
-          <input type="checkbox" checked={urgent} onChange={(event) => setUrgent(event.target.checked)} />
-          This needs urgent attention
-        </label>
-        <button disabled={submitting} className="rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59] disabled:opacity-60">{submitting ? "Submitting..." : "Submit report"}</button>
-        {message && <p role="status" className="text-sm text-[#285c59]">{message}</p>}
-        {error && <p role="alert" className="text-sm text-[#b33e2c]">{error}</p>}
+      <form onSubmit={submit} className="max-w-2xl overflow-hidden rounded-2xl border border-[#e4ded2] bg-white shadow-[0_20px_40px_-28px_rgba(24,59,58,0.25)]">
+        <div className="h-[3px] bg-[#e85b43]" />
+        <div className="space-y-5 p-6 sm:p-10">
+          <label className="block text-sm font-semibold text-[#183b3a]">
+            Category
+            <select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none transition-colors focus:border-[#e85b43]">
+              {CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm font-semibold text-[#183b3a]">
+            What happened?
+            <textarea
+              required
+              rows={5}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Include the relevant request or trip details, what happened, and when."
+              className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none transition-colors focus:border-[#e85b43]"
+            />
+          </label>
+          <label className="flex items-center justify-between gap-4 rounded-xl border border-[#e4ded2] bg-[#fbfaf7] px-4 py-3.5 text-sm font-medium text-[#183b3a]">
+            This needs urgent attention
+            <input type="checkbox" className="size-4 accent-[#183b3a]" checked={urgent} onChange={(event) => setUrgent(event.target.checked)} />
+          </label>
+          <div className="flex items-center gap-4 border-t border-[#eee9e1] pt-6">
+            <button disabled={submitting} className="rounded-xl bg-[#183b3a] px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#285c59] disabled:opacity-60">{submitting ? "Submitting..." : "Submit report"}</button>
+            {message && <p role="status" className="text-sm font-medium text-[#285c59]">{message}</p>}
+          </div>
+          {error && <p role="alert" className="text-sm text-[#b33e2c]">{error}</p>}
+        </div>
       </form>
     </AccountPage>
   );

@@ -89,7 +89,10 @@ export default function RequestsPage() {
   const renderCard = (request: ParcelMatch) => {
     const status = effectiveStatus(request.status, relevantMatchDate(request));
     const label = status === "expired" ? "Expired" : getRequestStatusLabel(request.status, role);
-    const canRespond = tab === "received" && String(request.status).toLowerCase() === "pending";
+    const hasCounterOffer = tab === "received" && (request.offerHistory?.length || 0) > 1;
+    const canRespond =
+      tab === "received" &&
+      ["pending", "countered"].includes(String(request.status).toLowerCase());
     const counterpart = tab === "sent" ? request.travelerName || "Traveller" : request.senderName || "Sender";
     return (
       <div key={request.id} className="border border-[#ded8ce] bg-[#fbfaf7] p-4">
@@ -127,10 +130,16 @@ export default function RequestsPage() {
             <button
               type="button"
               disabled={busyId === request.id}
-              onClick={() => accept(request.id)}
+              onClick={() => {
+                if (hasCounterOffer) {
+                  window.location.href = `/requests/${request.id}?role=sender`;
+                  return;
+                }
+                accept(request.id);
+              }}
               className="flex-1 rounded-lg bg-[#183b3a] py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
-              {busyId === request.id ? "Accepting..." : "Accept"}
+              {busyId === request.id ? "Accepting..." : hasCounterOffer ? "Review counter" : "Accept"}
             </button>
           </div>
         )}

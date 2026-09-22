@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
+import { Inbox } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 
@@ -21,11 +22,25 @@ export function AccountPage({ eyebrow = "Your Trickle account", title, descripti
   );
 }
 
-export function EmptyState({ title, description }: { title: string; description: string }) {
+export function EmptyState({
+  title,
+  description,
+  icon: Icon = Inbox,
+}: {
+  title: string;
+  description: string;
+  icon?: React.ComponentType<{ size?: number; className?: string }>;
+}) {
   return (
-    <div className="border-t-2 border-[#e7b65c] bg-[#fbfaf7] px-6 py-8 sm:px-8">
-      <h2 className="text-xl font-semibold text-[#183b3a]">{title}</h2>
-      <p className="mt-2 max-w-xl text-sm leading-6 text-[#62645f]">{description}</p>
+    <div className="max-w-2xl overflow-hidden rounded-2xl border border-[#e4ded2] bg-white shadow-[0_20px_40px_-28px_rgba(24,59,58,0.2)]">
+      <div className="h-[3px] bg-[#e7b65c]" />
+      <div className="flex flex-col items-center px-6 py-14 text-center sm:px-10">
+        <span className="grid size-14 place-items-center rounded-2xl bg-[#faeeda] text-[#7a5310]">
+          <Icon size={24} />
+        </span>
+        <h2 className="mt-5 text-xl font-semibold tracking-[-0.01em] text-[#183b3a]">{title}</h2>
+        <p className="mt-2 max-w-sm text-sm leading-6 text-[#8a8579]">{description}</p>
+      </div>
     </div>
   );
 }
