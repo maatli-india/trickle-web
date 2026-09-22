@@ -1,9 +1,8 @@
-import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   turbopack: {
-    root: path.join(__dirname, ".."),
+    root: __dirname,
   },
   async rewrites() {
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.trickle-dev.maatli.com/trickle";
