@@ -1,5 +1,3 @@
-import bundledLocations from "../../../trickle/src/assets/localLocations.json";
-
 export type LocalLocation = {
   area?: string;
   city?: string;
@@ -10,7 +8,10 @@ export type LocalLocation = {
   lng?: number;
 };
 
-const locations = bundledLocations as LocalLocation[];
+// Web search uses /api/v1/locations/search. Do not import the mobile
+// 3MB JSON here — Netlify Turbopack fails when that file is bundled
+// into a Client Component.
+const locations: LocalLocation[] = [];
 
 const normalize = (value: unknown) => String(value || "")
   .normalize("NFKD")
