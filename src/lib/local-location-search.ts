@@ -1,4 +1,6 @@
-import bundledLocations from "../../../trickle/src/assets/localLocations.json";
+// Vendored from the mobile app. Netlify only clones trickle-web, so this
+// cannot import from ../../../trickle/.
+import bundledLocations from "../assets/localLocations.json";
 
 export type LocalLocation = {
   area?: string;
