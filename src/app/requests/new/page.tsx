@@ -7,6 +7,8 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { LocationFields, emptyLocation, inputClass, labelClass, type LocationForm } from "@/components/forms/location-fields";
 import { useLocationPair } from "@/hooks/use-location-pair";
 import { apiRequest } from "@/services/api-client";
+import { getWebUserId } from "@/services/auth";
+import { dedupeRecentSearches, recentSearchesStorageKey } from "@/lib/recent-searches";
 
 type Traveller = {
   id?: string;
@@ -40,7 +42,7 @@ type Traveller = {
   pricePerPackage?: number;
   price?: number;
 };
-type RecentSearch = { from: LocationForm; to: LocationForm; pickupDate: string; parcelNotes: string; travellers?: Traveller[] };
+type RecentSearch = { from: LocationForm; to: LocationForm; pickupDate: string; parcelNotes?: string; travellers?: Traveller[] };
 
 const formatSearchDate = (value: string) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString("en-GB") : "Date not provided");
 const formatTravelMode = (value?: string) => {
@@ -62,14 +64,13 @@ const SORT_OPTIONS = [
   { key: "earliest", label: "Departure: Earliest" },
 ];
 const activeParcelSearchKey = "trickle.web.activeParcelSearch";
-const recentParcelSearchesKey = "trickle.web.recentParcelSearches";
 const maxRecentSearches = 5;
 
 export default function NewParcelRequestPage() {
   const router = useRouter();
+  const recentParcelSearchesKey = recentSearchesStorageKey(getWebUserId());
   const { from, setFrom, to, setTo } = useLocationPair();
   const [pickupDate, setPickupDate] = useState("");
-  const [parcelNotes, setParcelNotes] = useState("");
   const [travellers, setTravellers] = useState<Traveller[]>([]);
   const [travellerSearchMessage, setTravellerSearchMessage] = useState("");
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
@@ -78,6 +79,7 @@ export default function NewParcelRequestPage() {
   const [autoSearchPending, setAutoSearchPending] = useState(false);
   const [modeFilter, setModeFilter] = useState("all");
   const [sortKey, setSortKey] = useState("match");
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
 
   const filteredTravellers = useMemo(() => {
     const list = modeFilter === "all" ? travellers : travellers.filter((traveller) => modeKey(traveller.travelMode) === modeFilter);
@@ -127,20 +129,20 @@ export default function NewParcelRequestPage() {
       );
       setTravellers(enrichedMatches);
       setTravellerSearchMessage(matches.length ? `${matches.length} traveller${matches.length === 1 ? "" : "s"} found for your route.` : "No active travellers were found for that pickup date.");
-      const search: RecentSearch = { from, to, pickupDate, parcelNotes, travellers: enrichedMatches };
+      setSearchSubmitted(true);
+      const search: RecentSearch = { from, to, pickupDate, travellers: enrichedMatches };
       void apiRequest("/v1/recent-searches", {
         method: "POST",
         body: JSON.stringify({
           from: { address: from.address, lat: Number(from.lat), lng: Number(from.lng) },
           to: { address: to.address, lat: Number(to.lat), lng: Number(to.lng) },
           pickupDate,
-          parcelNotes,
         }),
       }).catch(() => undefined);
       window.sessionStorage.setItem(activeParcelSearchKey, JSON.stringify(search));
       setRecentSearches((current) => {
-        const next = [search, ...current.filter((item) => !(item.from.address === from.address && item.to.address === to.address && item.pickupDate === pickupDate))].slice(0, maxRecentSearches);
-        window.localStorage.setItem(recentParcelSearchesKey, JSON.stringify(next));
+        const next = dedupeRecentSearches([search, ...current], maxRecentSearches);
+        if (recentParcelSearchesKey) window.localStorage.setItem(recentParcelSearchesKey, JSON.stringify(next));
         return next;
       });
     } catch (requestError) {
@@ -159,23 +161,25 @@ export default function NewParcelRequestPage() {
           setFrom(saved.from || emptyLocation());
           setTo(saved.to || emptyLocation());
           setPickupDate(saved.pickupDate || "");
-          setParcelNotes(saved.parcelNotes || "");
           setTravellers(saved.travellers || []);
           if (saved.travellers?.length) {
+            setSearchSubmitted(true);
             setTravellerSearchMessage(`${saved.travellers.length} traveller${saved.travellers.length === 1 ? "" : "s"} found for your route.`);
           } else if (saved.autoSearch) {
             // Home hands off a route it hasn't searched yet — run the search as soon as it's loaded.
             setAutoSearchPending(true);
           }
         }
-        const savedRecentSearches = window.localStorage.getItem(recentParcelSearchesKey);
-        if (savedRecentSearches) setRecentSearches((JSON.parse(savedRecentSearches) as RecentSearch[]).slice(0, maxRecentSearches));
+        if (recentParcelSearchesKey) {
+          const savedRecentSearches = window.localStorage.getItem(recentParcelSearchesKey);
+          if (savedRecentSearches) setRecentSearches(dedupeRecentSearches(JSON.parse(savedRecentSearches) as RecentSearch[], maxRecentSearches));
+        }
       } catch {
         window.sessionStorage.removeItem(activeParcelSearchKey);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [recentParcelSearchesKey]);
 
   useEffect(() => {
     if (!autoSearchPending || !from.lat || !to.lat || !pickupDate) return;
@@ -189,26 +193,26 @@ export default function NewParcelRequestPage() {
   useEffect(() => {
     apiRequest<{ items?: RecentSearch[] }>("/v1/recent-searches")
       .then((response) => {
-        const searches = (response.items || []).slice(0, maxRecentSearches).map((search) => ({
+        const searches = dedupeRecentSearches(response.items || [], maxRecentSearches).map((search) => ({
           ...search,
           from: { ...search.from, lat: String(search.from.lat || ""), lng: String(search.from.lng || "") },
           to: { ...search.to, lat: String(search.to.lat || ""), lng: String(search.to.lng || "") },
         }));
         setRecentSearches(searches);
-        window.localStorage.setItem(recentParcelSearchesKey, JSON.stringify(searches));
+        if (recentParcelSearchesKey) window.localStorage.setItem(recentParcelSearchesKey, JSON.stringify(searches));
       })
       .catch(() => {
         // Browser storage remains a fallback when an older API deployment lacks this endpoint.
       });
-  }, []);
+  }, [recentParcelSearchesKey]);
 
   const openTravellerDetails = (traveller: Traveller) => {
-    window.sessionStorage.setItem("trickle.web.selectedTraveller", JSON.stringify({ traveller, from, to, pickupDate, parcelNotes }));
+    window.sessionStorage.setItem("trickle.web.selectedTraveller", JSON.stringify({ traveller, from, to, pickupDate, parcelNotes: "" }));
     router.push("/travellers/details");
   };
 
   const requestTraveller = (traveller: Traveller) => {
-    window.sessionStorage.setItem("trickle.web.selectedTraveller", JSON.stringify({ traveller, from, to, pickupDate, parcelNotes }));
+    window.sessionStorage.setItem("trickle.web.selectedTraveller", JSON.stringify({ traveller, from, to, pickupDate, parcelNotes: "" }));
     router.push("/travellers/request");
   };
 
@@ -216,8 +220,8 @@ export default function NewParcelRequestPage() {
     setFrom(search.from);
     setTo(search.to);
     setPickupDate(search.pickupDate);
-    setParcelNotes(search.parcelNotes);
     setTravellers(search.travellers || []);
+    setSearchSubmitted(Boolean(search.travellers));
     setTravellerSearchMessage(search.travellers?.length ? `${search.travellers.length} traveller${search.travellers.length === 1 ? "" : "s"} found for your route.` : "");
     setError("");
     window.sessionStorage.setItem(activeParcelSearchKey, JSON.stringify(search));
@@ -230,7 +234,7 @@ export default function NewParcelRequestPage() {
         <section className="border-b border-[#ded8ce] py-10 sm:py-14">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#e85b43]">Send a parcel</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em] sm:text-5xl">Search for travellers</h1>
-          <p className="mt-4 max-w-xl text-base leading-7 text-[#62645f]">Share your pickup date, route, and parcel notes to find travellers heading your way.</p>
+          <p className="mt-4 max-w-xl text-base leading-7 text-[#62645f]">Choose a pickup date and route to find travellers heading your way.</p>
         </section>
 
         {error && (
@@ -239,28 +243,38 @@ export default function NewParcelRequestPage() {
           </p>
         )}
 
-        <form onSubmit={findTravellers} className="grid gap-5 py-10 lg:grid-cols-2">
-          <label className={labelClass}>
-            Pickup date
-            <p className="mt-1 text-xs font-normal leading-5 text-[#62645f]">Choose the day you want your parcel collected.</p>
-            <input required type="date" value={pickupDate} onChange={(event) => setPickupDate(event.target.value)} className={inputClass} min={new Date().toISOString().slice(0, 10)} />
-          </label>
-          <div className="hidden lg:block" aria-hidden="true" />
-          <LocationFields title="Pickup location" hint="Where should the traveller collect your parcel?" value={from} onChange={setFrom} />
-          <LocationFields title="Delivery location" hint="Where should the parcel be delivered?" value={to} onChange={setTo} />
-          <label className={`${labelClass} lg:col-span-2`}>
-            Parcel notes
-            <p className="mt-1 text-xs font-normal leading-5 text-[#62645f]">Describe the item so travellers can decide whether it is suitable to carry.</p>
-            <textarea value={parcelNotes} onChange={(event) => setParcelNotes(event.target.value)} className={`${inputClass} min-h-28`} placeholder="E.g. small fragile package, clothing, or special instructions" />
-          </label>
-          <button disabled={submitting} className="rounded-xl bg-[#e85b43] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#cf4935] disabled:opacity-60 lg:col-span-2">
-            {submitting ? "Finding travellers..." : "Find travellers"}
-          </button>
-          {travellerSearchMessage && <p role="status" className="lg:col-span-2 text-sm text-[#285c59]">{travellerSearchMessage}</p>}
+        <form onSubmit={findTravellers} className="py-10">
+          {!searchSubmitted && (
+            <div className="grid gap-5 lg:grid-cols-2">
+              <label className={labelClass}>
+                Pickup date
+                <p className="mt-1 text-xs font-normal leading-5 text-[#62645f]">Choose the day you want your parcel collected.</p>
+                <input required type="date" value={pickupDate} onChange={(event) => setPickupDate(event.target.value)} className={inputClass} min={new Date().toISOString().slice(0, 10)} />
+              </label>
+              <div className="hidden lg:block" aria-hidden="true" />
+              <LocationFields title="Pickup location" hint="Where should the traveller collect your parcel?" value={from} onChange={setFrom} />
+              <LocationFields title="Delivery location" hint="Where should the parcel be delivered?" value={to} onChange={setTo} />
+              <button disabled={submitting} className="rounded-xl bg-[#e85b43] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#cf4935] disabled:opacity-60 lg:col-span-2">
+                {submitting ? "Finding travellers..." : "Find travellers"}
+              </button>
+            </div>
+          )}
+          {searchSubmitted && (
+            <div className="mb-8 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#d5eadf] bg-[#f2f8f5] p-5">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#285c59]">Your search</p>
+                <p className="mt-2 break-words text-base font-semibold text-[#183b3a]">{from.address} <span className="px-1 text-[#e85b43]">→</span> {to.address}</p>
+                <p className="mt-1 text-sm text-[#62645f]">Pickup {formatSearchDate(pickupDate)}</p>
+              </div>
+              <button type="button" onClick={() => setSearchSubmitted(false)} className="shrink-0 rounded-xl border border-[#285c59] bg-white px-4 py-2.5 text-sm font-semibold text-[#285c59] hover:border-[#e85b43] hover:text-[#e85b43]">Change search</button>
+            </div>
+          )}
+          {travellerSearchMessage && <p role="status" className="mb-4 text-sm font-semibold text-[#285c59]">{travellerSearchMessage}</p>}
           {travellers.length > 0 && (
-            <div className="space-y-4 lg:col-span-2">
+            <div className="rounded-2xl border border-[#e7b65c] bg-[#fffaf0] p-5 shadow-[0_12px_35px_rgba(122,83,16,0.08)] sm:p-7">
+              <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-xl font-semibold text-[#183b3a]">Travellers on this route</h3>
+                <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e85b43]">Best matches</p><h3 className="mt-1 text-2xl font-semibold text-[#183b3a]">Travellers on this route</h3></div>
                 <label className="text-xs font-semibold text-[#62645f]">
                   Sort by{" "}
                   <select value={sortKey} onChange={(event) => setSortKey(event.target.value)} className="ml-1 rounded-full border border-[#d7d2c9] bg-white px-3 py-1.5 text-xs font-semibold text-[#183b3a] outline-none focus:border-[#e85b43]">
@@ -336,6 +350,7 @@ export default function NewParcelRequestPage() {
                   </article>
                 );
               })}
+            </div>
             </div>
           )}
         </form>

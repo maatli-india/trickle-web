@@ -44,6 +44,8 @@ export type TravelPlan = {
 export type OfferHistoryEntry = {
   status?: string;
   proposedBy?: "sender" | "traveler" | string;
+  proposedByUserId?: string;
+  proposedByUserID?: string;
   baseAmount?: number;
   comment?: string;
   negotiationId?: string;
@@ -78,7 +80,17 @@ export type ParcelMatch = {
   note?: string;
   offerHistory?: OfferHistoryEntry[];
   paymentRef?: { status?: string };
-  cancellation?: { cancelledBy?: string; reason?: string };
+  cancellation?: {
+    cancelledBy?: string;
+    cancelledByName?: string;
+    reason?: string;
+    refundAmount?: number;
+    refundStatus?: "refund_pending" | "refund_processing" | "refund_completed" | "refund_failed";
+    refundTransactionId?: string;
+    refundInitiatedAt?: string;
+    refundCompletedAt?: string;
+    refundFailureReason?: string;
+  };
   createdAt?: string;
   [key: string]: unknown;
 };

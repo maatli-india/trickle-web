@@ -13,7 +13,7 @@ import { TravelerCard, type NearbyTravelerPlan } from "@/components/home/travele
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import type { LocationForm } from "@/components/forms/location-fields";
 import { useLocationPair } from "@/hooks/use-location-pair";
-import { hasAccessToken } from "@/services/auth";
+import { getWebUserId, hasAccessToken } from "@/services/auth";
 import { apiRequest } from "@/services/api-client";
 import { searchTravelPlans } from "@/services/travel-plans";
 import { listMyTravelPlans } from "@/services/travel-plans";
@@ -22,10 +22,10 @@ import { listNotifications, type Notification } from "@/services/notifications";
 import { extractListItems, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { isActiveIncomingRequest } from "@/lib/parcel-status";
 import { ALL_CATEGORIES, CATEGORIES, MOCK_NEARBY_ARRIVALS, POPULAR_ITEMS, TINTS, getDateOptions } from "@/lib/home-constants";
+import { dedupeRecentSearches, recentSearchesStorageKey } from "@/lib/recent-searches";
 
 type RecentSearch = { from: LocationForm; to: LocationForm; pickupDate: string; parcelNotes: string; parcelCategory?: string; travellers?: unknown[] };
 const activeParcelSearchKey = "trickle.web.activeParcelSearch";
-const recentParcelSearchesKey = "trickle.web.recentParcelSearches";
 const formatSearchDate = (value: string) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString("en-GB") : "Date not provided");
 const formatDateTime = (value?: string) => {
   if (!value) return "Date not set";
@@ -269,8 +269,23 @@ type HomeTraveller = {
   rating?: number;
 };
 
+function NearbyStatusCard({ title, message, error = false }: { title: string; message: string; error?: boolean }) {
+  return (
+    <div className={`mt-4 flex items-center gap-4 rounded-2xl border px-5 py-5 ${error ? "border-[#f0c9bd] bg-[#fff5f1]" : "border-[#d5eadf] bg-[#f2f8f5]"}`}>
+      <span className={`grid size-11 shrink-0 place-items-center rounded-full ${error ? "bg-[#ffe2d9] text-[#c94f3d]" : "bg-[#dcefe6] text-[#285c59]"}`}>
+        <MapPin size={19} />
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-[#183b3a]">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-[#62645f]">{message}</p>
+      </div>
+    </div>
+  );
+}
+
 function AuthenticatedHome() {
   const router = useRouter();
+  const recentParcelSearchesKey = recentSearchesStorageKey(getWebUserId());
   const dateOptions = useMemo(() => getDateOptions(), []);
   const { from, setFrom, to: address, setTo: setAddress, currentLocation, requestCurrentLocation, locationError } = useLocationPair();
   const [selectedDate, setSelectedDate] = useState(dateOptions[0].key);
@@ -299,8 +314,10 @@ function AuthenticatedHome() {
     queueMicrotask(() => {
       requestCurrentLocation("from");
       try {
-        const saved = window.localStorage.getItem(recentParcelSearchesKey);
-        if (saved) setRecentSearches((JSON.parse(saved) as RecentSearch[]).slice(0, 6));
+        if (recentParcelSearchesKey) {
+          const saved = window.localStorage.getItem(recentParcelSearchesKey);
+          if (saved) setRecentSearches(dedupeRecentSearches(JSON.parse(saved) as RecentSearch[], 6));
+        }
       } catch {
         // Ignore malformed local storage.
       }
@@ -315,7 +332,7 @@ function AuthenticatedHome() {
       .then((response) => setNotifications(extractListItems<Notification>(response)))
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [recentParcelSearchesKey]);
 
   useEffect(() => {
     if (!currentLocation.lat || !currentLocation.lng) {
@@ -442,7 +459,7 @@ function AuthenticatedHome() {
 
         <section className="pt-8">
           <h2 className="text-base font-semibold text-[#183b3a]">What are you sending?</h2>
-          <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+          <div className="mt-3 flex gap-3 overflow-x-auto px-1 pb-2 pt-2">
             {orderedCategories.map((name) => {
               const category = CATEGORIES.find((item) => item.name === name);
               const Icon = category?.icon || Grid3X3;
@@ -500,8 +517,6 @@ function AuthenticatedHome() {
           </aside>
         </div>
 
-        {plans.length > 0 && <section className="border-t border-[#ded8ce] py-8"><div className="flex items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e85b43]">Your journeys</p><h2 className="mt-1 text-2xl font-semibold text-[#183b3a]">Upcoming trip plans</h2></div><Link href="/plans" className="text-sm font-semibold text-[#e85b43]">See all plans →</Link></div><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{plans.slice(0, 3).map((plan) => <Link key={plan.id} href={`/plans/${plan.id}`} className="group border-l-2 border-[#e7b65c] bg-white p-5 transition hover:-translate-y-0.5 hover:shadow-md"><div className="flex items-start justify-between gap-3"><p className="min-w-0 flex-1 text-lg font-semibold text-[#183b3a]">{plan.from?.address || "Origin"} <span className="text-[#e85b43]">→</span> {plan.to?.address || "Destination"}</p><ChevronRight size={16} className="mt-1 shrink-0 text-[#e85b43] transition group-hover:translate-x-1" /></div><p className="mt-3 text-sm text-[#62645f]">{formatDateTime(plan.departureDate)} · {plan.travelMode?.replace("by_", "") || "travel"}</p><div className="mt-4 flex items-center justify-between border-t border-[#eee9e1] pt-3 text-xs"><span className="text-[#62645f]">{plan.maxWeightKg ? `Up to ${plan.maxWeightKg} kg` : "Capacity open"}</span><span className="font-semibold text-[#285c59]">{plan.acceptingNewRequests === false ? "Closed" : "Accepting requests"}</span></div></Link>)}</div></section>}
-
         <section className="pt-8">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-[#183b3a]">When are you sending or collecting?</h2>
@@ -546,6 +561,8 @@ function AuthenticatedHome() {
             Find travelers on this route
           </button>
         </section>
+
+        {plans.length > 0 && <section className="border-t border-[#ded8ce] py-8"><div className="flex items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e85b43]">Your journeys</p><h2 className="mt-1 text-2xl font-semibold text-[#183b3a]">Upcoming trip plans</h2></div><Link href="/plans" className="text-sm font-semibold text-[#e85b43]">See all plans →</Link></div><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{plans.slice(0, 3).map((plan) => <Link key={plan.id} href={`/plans/${plan.id}`} className="group border-l-2 border-[#e7b65c] bg-white p-5 transition hover:-translate-y-0.5 hover:shadow-md"><div className="flex items-start justify-between gap-3"><p className="min-w-0 flex-1 text-lg font-semibold text-[#183b3a]">{plan.from?.address || "Origin"} <span className="text-[#e85b43]">→</span> {plan.to?.address || "Destination"}</p><ChevronRight size={16} className="mt-1 shrink-0 text-[#e85b43] transition group-hover:translate-x-1" /></div><p className="mt-3 text-sm text-[#62645f]">{formatDateTime(plan.departureDate)} · {plan.travelMode?.replace("by_", "") || "travel"}</p><div className="mt-4 flex items-center justify-between border-t border-[#eee9e1] pt-3 text-xs"><span className="text-[#62645f]">{plan.maxWeightKg ? `Up to ${plan.maxWeightKg} kg` : "Capacity open"}</span><span className="font-semibold text-[#285c59]">{plan.acceptingNewRequests === false ? "Closed" : "Accepting requests"}</span></div></Link>)}</div></section>}
 
         {requestCards.length > 0 && (
           <section className="pt-8">
@@ -644,13 +661,18 @@ function AuthenticatedHome() {
           </div>
           <p className="text-sm text-[#a7a297]">Active trips starting near your current location</p>
           {nearbyLoading && <p className="mt-4 text-sm text-[#a7a297]">Looking for active travelers near you...</p>}
-          {!nearbyLoading && nearbyError && <p className="mt-4 text-sm text-[#a7a297]">Nearby traveler data is unavailable right now. Try again shortly.</p>}
+          {!nearbyLoading && nearbyError && (
+            <NearbyStatusCard
+              title="Nearby departures are temporarily unavailable"
+              message="We could not load active travelers from this area. Please check again shortly."
+              error
+            />
+          )}
           {!nearbyLoading && !nearbyError && nearbyTravelers.length === 0 && (
-            <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-[#ded8ce] px-6 py-8 text-center">
-              <MapPin size={20} className="text-[#285c59]" />
-              <p className="text-sm font-semibold text-[#183b3a]">No nearby trips yet</p>
-              <p className="text-xs text-[#a7a297]">We will show active travelers starting near your current location, their destinations, dates, and available capacity here.</p>
-            </div>
+            <NearbyStatusCard
+              title="No departures nearby yet"
+              message="Active travelers starting near this area will appear here with their destinations, dates, and available capacity."
+            />
           )}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {nearbyTravelers.slice(0, nearbyExpanded ? undefined : 5).map((plan) => (
@@ -667,6 +689,12 @@ function AuthenticatedHome() {
             </button>
           </div>
           <p className="text-sm text-[#a7a297]">Active trips ending near your current location</p>
+          {!arrivingTravelers.length && (
+            <NearbyStatusCard
+              title="No arrivals nearby yet"
+              message="We will show travelers arriving near this area as soon as an active trip is available."
+            />
+          )}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {arrivingTravelers.slice(0, arrivingExpanded ? undefined : 5).map((plan) => (
               <TravelerCard key={plan.id} plan={plan} direction="arrival" currentArea={currentArea} className="w-full" onSelect={() => openTravelerRequest(plan as NearbyTravelerPlan & HomeTraveller)} />

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpDown, MapPin, X } from "lucide-react";
 import type { LocationForm } from "@/components/forms/location-fields";
+import { formatLocalLocation, searchLocalLocations } from "@/lib/local-location-search";
 
 type AddressSuggestion = {
   place_id: string;
@@ -43,6 +44,20 @@ function RouteField({
     const timer = window.setTimeout(async () => {
       setSearching(true);
       try {
+        const localLocations = searchLocalLocations(value.address, { limit: 10 });
+        if (localLocations.length >= 2) {
+          setSuggestions(localLocations.map((location) => ({
+            place_id: `${location.lat}-${location.lng}-${formatLocalLocation(location)}`,
+            description: formatLocalLocation(location),
+            structured_formatting: {
+              main_text: location.area || location.city || location.state,
+              secondary_text: [location.city, location.state].filter(Boolean).join(", "),
+            },
+            lat: String(location.lat),
+            lng: String(location.lng),
+          })));
+          return;
+        }
         const localResponse = await fetch(`/api/v1/locations/search?q=${encodeURIComponent(value.address)}&limit=10`, { signal: controller.signal });
         if (localResponse.ok) {
           const localData = await localResponse.json();

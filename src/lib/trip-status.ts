@@ -35,7 +35,7 @@ export const hasPickedUpRequest = (requests: ParcelMatch[]): boolean =>
 
 export const canEditTrip = (plan: TravelPlan, requests: ParcelMatch[]): boolean => {
   const status = String(plan.status || "").toLowerCase();
-  return !isTripPast(plan) && !["completed", "cancelled"].includes(status) && !hasPickedUpRequest(requests);
+  return !isTripPast(plan) && !["completed", "cancelled"].includes(status);
 };
 
 export const canCancelOrDeleteTrip = (plan: TravelPlan): boolean => {

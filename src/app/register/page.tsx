@@ -159,7 +159,7 @@ export default function RegisterPage() {
             {step === "otp" && (
               <form onSubmit={submitOtp} className="space-y-7">
                 <div className="grid min-w-0 grid-cols-6 gap-2 sm:gap-3">
-                  {otp.map((digit, index) => <input key={index} ref={(element) => { inputs.current[index] = element; }} value={digit} onChange={(event) => updateOtp(index, event.target.value)} onKeyDown={(event) => handleOtpKeyDown(index, event.key)} className="h-14 w-full min-w-0 rounded-xl border border-[#d7d2c9] bg-white px-0 text-center text-xl font-semibold outline-none focus:border-[#e85b43]" inputMode="numeric" maxLength={1} aria-label={`OTP digit ${index + 1}`} />)}
+                  {otp.map((digit, index) => <input key={index} ref={(element) => { inputs.current[index] = element; }} autoFocus={index === 0} value={digit} onChange={(event) => updateOtp(index, event.target.value)} onKeyDown={(event) => handleOtpKeyDown(index, event.key)} className="h-14 w-full min-w-0 rounded-xl border border-[#d7d2c9] bg-white px-0 text-center text-xl font-semibold outline-none focus:border-[#e85b43]" inputMode="numeric" maxLength={1} aria-label={`OTP digit ${index + 1}`} />)}
                 </div>
                 <button disabled={loading} className="w-full rounded-xl bg-[#e85b43] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#cf4935] disabled:cursor-wait disabled:opacity-60">{loading ? "Verifying..." : "Verify OTP"}</button>
                 <button type="button" disabled={loading} onClick={submitPhone} className="w-full text-sm font-semibold text-[#183b3a] hover:text-[#e85b43]">Resend OTP</button>

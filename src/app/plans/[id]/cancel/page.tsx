@@ -72,7 +72,7 @@ export default function CancelTripPage({ params }: { params: Promise<{ id: strin
           <div className="border-l-2 border-[#285c59] bg-[#e5f0eb] p-6">
             <h1 className="text-2xl font-semibold text-[#183b3a]">All senders notified</h1>
             <p className="mt-3 text-sm leading-6 text-[#62645f]">
-              All {requests.length} sender{requests.length === 1 ? " has" : "s have"} been refunded ₹{totalRefund} total and notified.{" "}
+              All {requests.length} sender{requests.length === 1 ? " is" : "s are"} being refunded ₹{totalRefund} total — each refund&apos;s exact status is visible on that request&apos;s details page.{" "}
               {collected.length ? "Support will contact you within 2 hours about returning the collected packages." : "This trip is removed from your schedule."}
             </p>
             <Link href="/plans" className="mt-6 inline-block rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white">
