@@ -136,6 +136,10 @@ export type RegistrationProfile = {
   phoneExt: string;
   gender: "male" | "female" | "other";
   dob: string;
+  // Kosh file id from a signup-token profile-pic upload. The phone/email in
+  // this body must match the identity the signup token was issued for
+  // (mismatch is 403); a FAILED upload is 409, an already-used picture 409.
+  profilePicId?: string;
 };
 
 export const createUser = async (profile: RegistrationProfile) => {

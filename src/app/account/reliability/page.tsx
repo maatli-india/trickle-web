@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Award, CheckCircle2, Clock, PackageCheck, ShieldCheck, XCircle } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, Award, CheckCircle2, ChevronRight, Clock, PackageCheck, ShieldCheck, XCircle } from "lucide-react";
 import { AccountPage } from "@/components/account/account-page";
 import { getMyReliability, type ReliabilityDetail } from "@/services/reliability";
 
@@ -86,6 +87,17 @@ export default function ReliabilityPage() {
                 <p className="text-lg font-semibold text-[#1b2230]">{detail.minTripsRequired ?? "--"}</p>
                 <p className="mt-1 text-[10.5px] text-[#8991a3]">Trips needed</p>
               </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-[#e4e8f0] bg-white p-[14px]">
+              <p className="text-[13px] font-semibold text-[#1b2230]">How this works</p>
+              <p className="mt-1.5 text-xs leading-5 text-[#5a6478]">
+                Everyone starts at 100. Completing trips and requests on time raises it; late cancellations, no-shows, and emergencies after pickup lower it. It&apos;s calculated from your recent activity, not your whole history, so it recovers as you keep completing trips.
+              </p>
+              <Link href="/cancellation-policy" className="mt-2.5 inline-flex items-center gap-1 text-xs font-semibold text-[#0f6e56] hover:underline">
+                See the full cancellation & refund policy
+                <ChevronRight size={13} />
+              </Link>
             </div>
 
             {detail.breakdown && detail.breakdown.length > 0 && (

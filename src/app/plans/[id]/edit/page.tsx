@@ -5,7 +5,13 @@ import Link from "next/link";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { getTravelPlanById, listParcelMatchesForPlan, updateTravelPlan } from "@/services/travel-plans";
+import {
+  getTravelPlanById,
+  listParcelMatchesForPlan,
+  previewTripPricing,
+  updateTravelPlan,
+  type TravelPlanPricingPreview,
+} from "@/services/travel-plans";
 import { extractListItems, extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { isTripPast, majorEditBlocked, majorChangeAllowanceUsed, hasPickedUpRequest } from "@/lib/trip-status";
 import {
@@ -41,7 +47,35 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
   const [delivery, setDelivery] = useState<Set<string>>(new Set());
   const [maxWeight, setMaxWeight] = useState("5");
   const [maxParcelCount, setMaxParcelCount] = useState("1");
+  const [price, setPrice] = useState("");
   const [note, setNote] = useState("");
+  const [pricingPreview, setPricingPreview] = useState<TravelPlanPricingPreview | null>(null);
+  const [pricingPreviewLoading, setPricingPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    const amount = Number(price);
+    if (!price || !Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setPricingPreviewLoading(true);
+      previewTripPricing(amount)
+        .then((preview) => {
+          if (!cancelled) setPricingPreview(preview);
+        })
+        .catch(() => {
+          if (!cancelled) setPricingPreview(null);
+        })
+        .finally(() => {
+          if (!cancelled) setPricingPreviewLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [price]);
 
   useEffect(() => {
     let active = true;
@@ -60,6 +94,7 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
         setDelivery(keysFromApiValues(loadedPlan.deliveryHandovers, loadedPlan.deliveryHandover, DELIVERY_KEY_FROM_API));
         setMaxWeight(String(loadedPlan.maxWeightKg || 5));
         setMaxParcelCount(String(loadedPlan.maxParcelCount || 1));
+        setPrice(loadedPlan.pricePerPackage ? String(loadedPlan.pricePerPackage) : "");
         setNote(loadedPlan.additionalInfo || "");
       } else {
         setError("We could not load this trip.");
@@ -126,6 +161,11 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
       setError("Max parcels must be a whole number between 1 and 20.");
       return;
     }
+    const priceValue = Number(price);
+    if (!price || !Number.isFinite(priceValue) || priceValue <= 0) {
+      setError("Set a price per package.");
+      return;
+    }
     if (!pickup.size || !delivery.size) {
       setError("Choose at least one pickup and one delivery option.");
       return;
@@ -159,7 +199,7 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
         timezone: plan.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
         additionalInfo: note.trim(),
         maxWeightKg: weight,
-        pricePerPackage: plan.pricePerPackage,
+        pricePerPackage: priceValue,
         maxParcelCount: count,
         acceptedParcelTypes: plan.acceptedParcelTypes,
         acceptedParcelCategories: plan.acceptedParcelCategories,
@@ -297,7 +337,24 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
             Max parcels
             <input type="number" min={1} max={20} step={1} value={maxParcelCount} onChange={(event) => setMaxParcelCount(event.target.value)} className={inputClass} />
           </label>
+          <label className={labelClass}>
+            Price per package
+            <input required type="number" min={1} value={price} onChange={(event) => setPrice(event.target.value)} className={inputClass} placeholder="₹" />
+          </label>
         </div>
+        {Number(price) > 0 && (pricingPreviewLoading || pricingPreview) && (
+          <div className="mt-3 rounded-xl border border-[#d7d2c9] bg-white p-4 text-sm">
+            {pricingPreviewLoading && !pricingPreview ? (
+              <p className="text-[#62645f]">Calculating…</p>
+            ) : pricingPreview ? (
+              <>
+                <p className="text-xs uppercase tracking-[0.08em] text-[#62645f]">You take home</p>
+                <p className="mt-0.5 text-lg font-semibold text-[#285c59]">₹{pricingPreview.travelerPayoutAmount}</p>
+                <p className="mt-1 text-xs text-[#62645f]">per package, after platform fee</p>
+              </>
+            ) : null}
+          </div>
+        )}
         <label className={`mt-6 block ${labelClass}`}>
           Notes
           <textarea value={note} onChange={(event) => setNote(event.target.value)} className={`${inputClass} min-h-24`} maxLength={300} />

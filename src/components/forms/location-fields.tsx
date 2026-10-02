@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { formatLocalLocation, searchLocalLocations } from "@/lib/local-location-search";
 
 export type LocationForm = { address: string; lat: string; lng: string };
 
@@ -63,6 +64,7 @@ export function LocationFields({
 }) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const selectedAddressRef = useRef("");
 
   useEffect(() => {
@@ -74,12 +76,32 @@ export function LocationFields({
       value.address === selectedAddressRef.current ||
       value.address === "Current location" ||
       value.address.trim().length < 2
-    )
+    ) {
+      setHasSearched(false);
       return;
+    }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSearching(true);
+      setHasSearched(false);
       try {
+        // Same three-tier search every other location field in the product
+        // uses: bundled curated dataset first (instant, no ambiguous/overly
+        // specific results), then the backend cache, then Google Places.
+        const bundledLocations = searchLocalLocations(value.address, { limit: 10 });
+        if (bundledLocations.length >= 2) {
+          setSuggestions(bundledLocations.map((location) => ({
+            place_id: `${location.lat}-${location.lng}-${formatLocalLocation(location)}`,
+            description: formatLocalLocation(location),
+            structured_formatting: {
+              main_text: location.area || location.city || location.state,
+              secondary_text: [location.city, location.state].filter(Boolean).join(", "),
+            },
+            lat: location.lat !== undefined ? String(location.lat) : undefined,
+            lng: location.lng !== undefined ? String(location.lng) : undefined,
+          })));
+          return;
+        }
         const localResponse = await fetch(`/api/v1/locations/search?q=${encodeURIComponent(value.address)}&limit=10`, {
           signal: controller.signal,
         });
@@ -99,6 +121,7 @@ export function LocationFields({
         if ((error as Error).name !== "AbortError") setSuggestions([]);
       } finally {
         setSearching(false);
+        setHasSearched(true);
       }
     }, 350);
     return () => {
@@ -113,6 +136,7 @@ export function LocationFields({
   const selectSuggestion = async (suggestion: AddressSuggestion) => {
     setSuggestions([]);
     setSearching(false);
+    setHasSearched(false);
     if (suggestion.lat && suggestion.lng) {
       selectedAddressRef.current = suggestion.description;
       onChange({ address: suggestion.description, lat: suggestion.lat, lng: suggestion.lng });
@@ -147,9 +171,12 @@ export function LocationFields({
             placeholder="Search an area or address"
             autoComplete="off"
           />
-          {(searching || visibleSuggestions.length > 0) && (
+          {(searching || visibleSuggestions.length > 0 || hasSearched) && (
             <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-[#d7d2c9] bg-white shadow-lg">
               {searching && <p className="px-4 py-3 text-xs text-[#62645f]">Searching areas...</p>}
+              {!searching && hasSearched && visibleSuggestions.length === 0 && (
+                <p className="px-4 py-3 text-xs text-[#62645f]">No matches found. Try a nearby landmark or check the spelling.</p>
+              )}
               {visibleSuggestions.map((suggestion) => (
                 <button
                   type="button"

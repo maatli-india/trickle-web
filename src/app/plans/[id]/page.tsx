@@ -10,8 +10,10 @@ import {
   cancelTravelPlan,
   getTravelPlanById,
   listParcelMatchesForPlan,
+  previewTripPricing,
   recordTravelPlanView,
   updateTravelPlan,
+  type TravelPlanPricingPreview,
 } from "@/services/travel-plans";
 import { respondToCounterOffer } from "@/services/parcel-matches";
 import { extractListItems, extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
@@ -40,6 +42,7 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
   const [actionLoading, setActionLoading] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pricingPreview, setPricingPreview] = useState<TravelPlanPricingPreview | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +57,13 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
             const embedded = details.requesters || details.requests || [];
             const loaded = matchesResult.status === "fulfilled" ? extractListItems<ParcelMatch>(matchesResult.value as never) : [];
             setRequests(loaded.length ? loaded : embedded);
+            if (details.pricePerPackage) {
+              previewTripPricing(details.pricePerPackage)
+                .then((preview) => {
+                  if (active) setPricingPreview(preview);
+                })
+                .catch(() => {});
+            }
           }
         } else {
           setError("We could not load this trip.");
@@ -131,7 +141,7 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
     setTogglingAccepting(true);
     const next = !acceptingNewRequests;
     try {
-      await updateTravelPlan(plan.id, { ...plan, acceptingNewRequests: next, notifySenders: false });
+      await updateTravelPlan(plan.id, { ...plan, pricePerPackage: plan.pricePerPackage ?? 0, acceptingNewRequests: next, notifySenders: false });
       setAcceptingNewRequests(next);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not update this trip.");
@@ -196,6 +206,13 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
             {plan.maxWeightKg && <p>Up to {plan.maxWeightKg} kg</p>}
             {plan.pricePerPackage && <p>₹{plan.pricePerPackage} / package</p>}
           </div>
+          {pricingPreview && (
+            <div className="mt-4 inline-block rounded-xl border border-white/20 bg-white/10 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.08em] text-[#c5d4ce]">You take home</p>
+              <p className="mt-0.5 text-lg font-semibold text-white">₹{pricingPreview.travelerPayoutAmount}</p>
+              <p className="mt-0.5 text-xs text-[#c5d4ce]">per package, after platform fee</p>
+            </div>
+          )}
         </section>
 
         {error && <p role="alert" className="mt-6 rounded-xl border border-[#e85b43]/30 bg-[#fff0eb] px-4 py-3 text-sm text-[#b33e2c]">{error}</p>}
@@ -325,7 +342,7 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
                       </div>
                     </div>
                     <p className="shrink-0 text-sm font-semibold text-[#285c59]">
-                      {request.agreedPrice ? `₹${request.agreedPrice}` : request.baseAmount ? `₹${request.baseAmount}` : "Offer pending"}
+                      {request.travelerDisplayAmount ? `₹${request.travelerDisplayAmount}` : "Offer pending"}
                     </p>
                   </div>
                   {respondable ? (

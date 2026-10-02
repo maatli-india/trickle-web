@@ -135,13 +135,10 @@ export const relevantMatchDate = (match: { targetDeliveryTime?: string; departur
 
 export const formatMoney = (value?: number) => (value || value === 0 ? `₹${value}` : "Offer pending");
 
-// Ported from mobile Home's activeIncomingRequest() — a traveler-side request
-// that's genuinely waiting on the traveler (not one where the traveler just
-// sent a counter-offer that's awaiting the sender instead).
-export const isActiveIncomingRequest = (request: {
-  status?: string;
-  travelerUserId?: string;
-  offerHistory?: { status?: string; proposedByUserId?: string }[];
-}): boolean =>
-  ["pending", "searching", "negotiating", "countered"].includes(String(request.status || "").toLowerCase()) &&
-  !request.offerHistory?.some((offer) => offer.status === "pending" && offer.proposedByUserId === request.travelerUserId);
+// Ported from mobile Home's activeIncomingRequest() — a traveler-side
+// request that's genuinely waiting on the traveler. Counter-offer
+// negotiation is disabled (offerHistory is admin-only now — see
+// transitorder's NewParcelMatchView), so any request in one of these
+// statuses is, by definition, still awaiting the traveler's own response.
+export const isActiveIncomingRequest = (request: { status?: string }): boolean =>
+  ["pending", "searching", "negotiating", "countered"].includes(String(request.status || "").toLowerCase());

@@ -40,6 +40,7 @@ type Traveller = {
   additionalInfo?: string;
   maxWeightKg?: number;
   pricePerPackage?: number;
+  senderDisplayPricePerPackage?: number;
   price?: number;
 };
 type RecentSearch = { from: LocationForm; to: LocationForm; pickupDate: string; parcelNotes?: string; travellers?: Traveller[] };
@@ -84,7 +85,7 @@ export default function NewParcelRequestPage() {
   const filteredTravellers = useMemo(() => {
     const list = modeFilter === "all" ? travellers : travellers.filter((traveller) => modeKey(traveller.travelMode) === modeFilter);
     return [...list].sort((first, second) => {
-      if (sortKey === "price") return Number(first.pricePerPackage || first.price || 0) - Number(second.pricePerPackage || second.price || 0);
+      if (sortKey === "price") return Number(first.senderDisplayPricePerPackage ?? first.pricePerPackage ?? first.price ?? 0) - Number(second.senderDisplayPricePerPackage ?? second.pricePerPackage ?? second.price ?? 0);
       if (sortKey === "rating") return Number(second.user?.rating ?? second.rating ?? 0) - Number(first.user?.rating ?? first.rating ?? 0);
       if (sortKey === "earliest") return String(first.departureDate || "").localeCompare(String(second.departureDate || ""));
       return 0;
@@ -300,7 +301,7 @@ export default function NewParcelRequestPage() {
                 const profilePic = traveller.user?.profilePicUrl || traveller.profilePicUrl || traveller.profilePicture;
                 const rating = traveller.user?.rating ?? traveller.user?.ratings ?? traveller.rating ?? traveller.ratings;
                 const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips;
-                const price = traveller.pricePerPackage || traveller.price;
+                const price = traveller.senderDisplayPricePerPackage ?? traveller.pricePerPackage ?? traveller.price;
                 return (
                   <article
                     key={traveller.id || traveller.travelerId || index}
@@ -318,7 +319,10 @@ export default function NewParcelRequestPage() {
                           </p>
                         </div>
                       </div>
-                      <p className="shrink-0 text-lg font-semibold text-[#285c59]">{price ? `₹${price}` : "Open"}</p>
+                      <div className="shrink-0 text-right">
+                        <p className="text-lg font-semibold text-[#285c59]">{price ? `₹${price}` : "Open"}</p>
+                        {price ? <p className="text-xs text-[#62645f]">per package</p> : null}
+                      </div>
                     </div>
                     <div className="mt-4 border-t border-[#ded8ce] pt-4">
                       <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">

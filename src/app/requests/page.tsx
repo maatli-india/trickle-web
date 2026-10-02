@@ -89,11 +89,18 @@ export default function RequestsPage() {
   const renderCard = (request: ParcelMatch) => {
     const status = effectiveStatus(request.status, relevantMatchDate(request));
     const label = status === "expired" ? "Expired" : getRequestStatusLabel(request.status, role);
-    const hasCounterOffer = tab === "received" && (request.offerHistory?.length || 0) > 1;
     const canRespond =
       tab === "received" &&
       ["pending", "countered"].includes(String(request.status).toLowerCase());
     const counterpart = tab === "sent" ? request.travelerName || "Traveller" : request.senderName || "Sender";
+    // Role-scoped amounts straight from the backend (see transitorder's
+    // NewParcelMatchView) — "received": travelerDisplayAmount, this
+    // request's own agreed amount (travelerPayoutAmount is the actual
+    // take-home after the tier deduction, shown on the details screen
+    // instead, not on this compact card). "sent": senderPayableAmount
+    // (GST-inclusive) once accepted, else senderOfferedAmount (pre-GST)
+    // while still pending.
+    const displayAmount = tab === "received" ? request.travelerDisplayAmount : request.senderPayableAmount ?? request.senderOfferedAmount;
     return (
       <div key={request.id} className="border border-[#ded8ce] bg-[#fbfaf7] p-4">
         <Link href={`/requests/${request.id}?role=${role}`} className="block">
@@ -113,7 +120,7 @@ export default function RequestsPage() {
                 </p>
               </div>
             </div>
-            <p className="shrink-0 text-sm font-semibold text-[#285c59]">{formatMoney(request.agreedPrice || request.baseAmount)}</p>
+            <p className="shrink-0 text-sm font-semibold text-[#285c59]">{formatMoney(displayAmount)}</p>
           </div>
           <span className="mt-3 inline-block rounded-full bg-[#e5f0eb] px-3 py-1 text-xs font-semibold text-[#285c59]">{label}</span>
         </Link>
@@ -130,16 +137,10 @@ export default function RequestsPage() {
             <button
               type="button"
               disabled={busyId === request.id}
-              onClick={() => {
-                if (hasCounterOffer) {
-                  window.location.href = `/requests/${request.id}?role=sender`;
-                  return;
-                }
-                accept(request.id);
-              }}
+              onClick={() => accept(request.id)}
               className="flex-1 rounded-lg bg-[#183b3a] py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
-              {busyId === request.id ? "Accepting..." : hasCounterOffer ? "Review counter" : "Accept"}
+              {busyId === request.id ? "Accepting..." : "Accept"}
             </button>
           </div>
         )}
