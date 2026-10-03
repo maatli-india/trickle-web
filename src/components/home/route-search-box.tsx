@@ -29,6 +29,7 @@ function RouteField({
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const selectedAddressRef = useRef("");
 
   useEffect(() => {
@@ -38,11 +39,13 @@ function RouteField({
   useEffect(() => {
     if (value.address === selectedAddressRef.current || value.address.trim().length < 2) {
       setSuggestions([]);
+      setHasSearched(false);
       return;
     }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSearching(true);
+      setHasSearched(false);
       try {
         const localLocations = searchLocalLocations(value.address, { limit: 10 });
         if (localLocations.length >= 2) {
@@ -82,6 +85,7 @@ function RouteField({
         if ((error as Error).name !== "AbortError") setSuggestions([]);
       } finally {
         setSearching(false);
+        setHasSearched(true);
       }
     }, 300);
     return () => {
@@ -143,9 +147,12 @@ function RouteField({
           <X size={14} />
         </button>
       )}
-      {focused && (searching || suggestions.length > 0) && (
+      {focused && (searching || suggestions.length > 0 || hasSearched) && (
         <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-[#d7d2c9] bg-white shadow-lg">
           {searching && <p className="px-4 py-3 text-xs text-[#62645f]">Searching areas...</p>}
+          {!searching && hasSearched && suggestions.length === 0 && (
+            <p className="px-4 py-3 text-xs text-[#62645f]">No matches found. Try a nearby landmark or check the spelling.</p>
+          )}
           {suggestions.map((suggestion) => (
             <button
               type="button"

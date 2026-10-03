@@ -1,12 +1,13 @@
 "use client";
 
-import { use, useEffect, useRef, useState, type ClipboardEvent } from "react";
+import { Suspense, use, useEffect, useRef, useState, type ClipboardEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowRight, Check, Copy, IndianRupee, MessageCircle, Phone, MessageSquare, Share2, Trash2 } from "lucide-react";
+import { Check, Copy, IndianRupee, MessageCircle, Phone, Share2, Trash2 } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { ParcelPhotoGallery } from "@/components/ui/parcel-photo-gallery";
 import {
   cancelParcelMatch,
   confirmHandoff,
@@ -21,7 +22,8 @@ import {
   type PaymentOrder,
 } from "@/services/parcel-matches";
 import { redirectToPayUHostedCheckout } from "@/lib/payu";
-import { extractOneItem, type ParcelMatch } from "@/types/travel";
+import { getTravelPlanById } from "@/services/travel-plans";
+import { extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { CANCELLABLE_STATUSES, effectiveStatus, getRequestStatusLabel, relevantMatchDate } from "@/lib/parcel-status";
 import { avatarTint, initials } from "@/lib/home-constants";
 
@@ -37,11 +39,22 @@ const isEarlyCancellation = (relevantDate?: string) => {
   if (!relevantDate) return true;
   const date = new Date(String(relevantDate).replace(" ", "T"));
   if (Number.isNaN(date.getTime())) return true;
-  return date.getTime() - Date.now() > 24 * 60 * 60 * 1000;
+  return date.getTime() - Date.now() > 48 * 60 * 60 * 1000;
 };
 
+// useSearchParams() opts the page out of static rendering unless it's
+// wrapped in its own Suspense boundary — next build's prerender step fails
+// outright without this.
 export default function ParcelRequestDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#f6f2eb]" />}>
+      <ParcelRequestDetailsContent id={id} />
+    </Suspense>
+  );
+}
+
+function ParcelRequestDetailsContent({ id }: { id: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const role = (searchParams.get("role") === "traveller" ? "traveller" : "sender") as "sender" | "traveller";
@@ -59,12 +72,10 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
   const [handoffError, setHandoffError] = useState("");
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [otpCopied, setOtpCopied] = useState(false);
-  const [counterAmount, setCounterAmount] = useState("");
-  const [showCounterForm, setShowCounterForm] = useState(false);
-  const [counterResponse, setCounterResponse] = useState<"accept" | "reject" | null>(null);
   const [ratingValue, setRatingValue] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [travelPlan, setTravelPlan] = useState<TravelPlan | null>(null);
   const handoffInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   const refresh = () =>
@@ -107,6 +118,15 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.status, handoffOtp]);
 
+  useEffect(() => {
+    if (!isSender && match?.travelPlanId) {
+      getTravelPlanById(match.travelPlanId)
+        .then((response) => setTravelPlan(extractOneItem<TravelPlan>(response) || null))
+        .catch(() => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match?.travelPlanId]);
+
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col bg-[#f6f2eb]">
@@ -133,27 +153,23 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
 
   const relevantDate = relevantMatchDate(match);
   const status = effectiveStatus(match.status, relevantDate);
-  const price = match.agreedPrice || match.baseAmount || match.pricing?.baseAmount || 0;
+  // Role-scoped amounts (see transitorder's NewParcelMatchView) — this
+  // caller only ever receives the field(s) for their own role. For the
+  // sender, price is the pre-GST amount they offered (senderOfferedAmount);
+  // for the traveler, it's what they'll actually receive
+  // (travelerPayoutAmount).
+  const price = (isSender ? match.senderOfferedAmount : match.travelerPayoutAmount) || 0;
+  // match.senderPayableAmount is the sender's real checkout total (offered
+  // amount + platform commission + GST) — only ever populated for the
+  // sender, and only once the match has been accepted or later. Never
+  // recompute the GST-inclusive total client-side — it's whatever
+  // transitorder's computeAmountViews actually charges (match.Pricing.
+  // TotalPayableAmount), and that formula has changed shape more than once.
+  // A hardcoded multiplier here silently drifts out of sync with the real
+  // amount createPaymentOrder returns.
+  const payableAmount = (isSender && match.senderPayableAmount) || price;
+  const packageCount = match.packageCount && match.packageCount > 0 ? match.packageCount : 1;
   const counterpart = isSender ? match.travelerName || "Traveller" : match.senderName || "Sender";
-  const offerHistory = match.offerHistory || [];
-  const originalOffer = offerHistory.find(
-    (offer) =>
-      offer.proposedByUserId === match.senderUserId ||
-      offer.proposedByUserID === match.senderUserId ||
-      offer.proposedBy === "sender",
-  ) || offerHistory[0];
-  const latestOffer = offerHistory[offerHistory.length - 1];
-  const hasCounterOffer = offerHistory.length > 1 && latestOffer?.baseAmount != null;
-  const canRespondToCounterOffer =
-    isSender && hasCounterOffer && latestOffer?.status === "pending";
-  const originalOfferAmount = originalOffer?.baseAmount ?? match.baseAmount ?? 0;
-  const counterOfferAmount = latestOffer?.baseAmount ?? 0;
-  const counterOfferFrom =
-    latestOffer?.proposedByUserId === match.senderUserId ||
-    latestOffer?.proposedByUserID === match.senderUserId ||
-    latestOffer?.proposedBy === "sender"
-      ? match.senderName || "Sender"
-      : match.travelerName || "Traveller";
   const counterpartPhone = String(
     (isSender ? match.travelerPhone : match.senderPhone) ||
       (isSender
@@ -184,17 +200,6 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
     } finally {
       setBusy(false);
     }
-  };
-
-  const confirmCounterResponse = async () => {
-    if (!counterResponse) return;
-    const action = counterResponse;
-    setCounterResponse(null);
-    if (action === "accept" && canRespondToCounterOffer) {
-      await acceptCounterOfferAndPay();
-      return;
-    }
-    await respond(action);
   };
 
   const cancel = async () => {
@@ -250,26 +255,6 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
     }
   };
 
-  const acceptCounterOfferAndPay = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const response = await respondToCounterOffer(id, "accept");
-      const acceptedMatch = extractOneItem<ParcelMatch>(response);
-      if (acceptedMatch) setMatch(acceptedMatch);
-      const order = await createPaymentOrder(id, "web");
-      setPaymentOrder(order);
-      if (!order.checkoutUrl) {
-        throw new Error("Payment is not available right now. Please try again shortly.");
-      }
-      const { hash } = await signCheckoutHash(order.transactionId, "hosted_checkout_hash");
-      redirectToPayUHostedCheckout(order, hash);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not start payment.");
-      setBusy(false);
-    }
-  };
-
   const testConfirm = async () => {
     if (!paymentOrder?.transactionId) return;
     setBusy(true);
@@ -295,8 +280,11 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
     }
   };
 
-  const fee = isEarlyCancellation(relevantDate) ? 0 : Math.round(price * FEE_PCT);
-  const refund = Math.max(0, price - fee);
+  // The sender's cancellation fee/refund is based on what they actually
+  // paid (payableAmount), not the shared agreed amount — matching the
+  // backend's own cancellationOutcome calculation.
+  const fee = isEarlyCancellation(relevantDate) ? 0 : Math.round(payableAmount * FEE_PCT);
+  const refund = Math.max(0, payableAmount - fee);
 
   const submitHandoffCode = async () => {
     if (handoffDigits.length !== 4 || handoffBusy) return;
@@ -403,64 +391,41 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
             </p>
             <p>By {formatDateTime(relevantDate)}</p>
           </div>
-          <p className="mt-4 text-xl font-semibold">{price ? `₹${price}` : "Offer pending"}</p>
+          {(() => {
+            // Traveler: rate is the trip's own listed per-package price —
+            // total = rate × count (a reference, not what was agreed).
+            // Sender: price (match.senderOfferedAmount) is already the
+            // pre-GST total the sender offered — divide back down for the
+            // per-package figure in the breakdown pill, don't multiply again.
+            const rate = !isSender ? travelPlan?.pricePerPackage : price ? price / packageCount : undefined;
+            if (rate == null) {
+              return <p className="mt-4 text-xl font-semibold">{price ? `₹${price}` : "Offer pending"}</p>;
+            }
+            const total = !isSender ? rate * packageCount : price;
+            return (
+              <div className="mt-5 flex flex-col items-center rounded-2xl bg-white/10 px-6 py-7 text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#c5d4ce]">
+                  {!isSender ? "Your rate for this request" : "Your offer total"}
+                </p>
+                <p className="mt-1.5 text-4xl font-semibold text-[#e7b65c]">₹{total}</p>
+                <span className="mt-3 rounded-full bg-white/15 px-3.5 py-1.5 text-xs font-semibold text-white">
+                  ₹{Number(rate.toFixed(2))} × {packageCount} package{packageCount > 1 ? "s" : ""}
+                </span>
+              </div>
+            );
+          })()}
           <span className="mt-3 inline-block rounded-full bg-[#e7b65c] px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#183b3a]">
             {status === "expired" ? "Expired" : getRequestStatusLabel(match.status, role)}
           </span>
         </section>
 
-        {hasCounterOffer && (
-          <section className="mt-6 border-2 border-[#e7b65c] bg-[#fff8e7] p-6 shadow-[0_8px_24px_rgba(231,182,92,0.16)]" aria-label="Counter offer details">
-            <div className="flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#e7b65c] text-[#183b3a]">
-                <MessageSquare size={18} />
-              </span>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8a641d]">Counter offer</p>
-                <h2 className="mt-1 text-xl font-semibold text-[#183b3a]">
-                  {counterOfferFrom} proposed a new amount
-                </h2>
-              </div>
-            </div>
-            <div className="mt-5 grid items-center gap-3 sm:grid-cols-[1fr_auto_1fr]">
-              <div className="border border-[#ead9ad] bg-white/70 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#81745c]">Original offer</p>
-                <p className="mt-1 text-2xl font-bold text-[#62645f]">₹{originalOfferAmount}</p>
-              </div>
-              <ArrowRight className="hidden text-[#b8892d] sm:block" size={20} aria-hidden="true" />
-              <div className="border-2 border-[#e7b65c] bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#8a641d]">Counter amount</p>
-                <p className="mt-1 text-3xl font-bold text-[#183b3a]">₹{counterOfferAmount}</p>
-              </div>
-            </div>
-            {latestOffer?.comment && (
-              <p className="mt-4 border-l-2 border-[#e7b65c] pl-3 text-sm leading-6 text-[#62645f]">“{latestOffer.comment}”</p>
-            )}
-          </section>
-        )}
-
         {error && <p role="alert" className="mt-6 rounded-xl border border-[#e85b43]/30 bg-[#fff0eb] px-4 py-3 text-sm text-[#b33e2c]">{error}</p>}
+
+        <ParcelPhotoGallery matchId={id} imageIds={match.parcelImageIds || []} canManage={isSender} onChanged={refresh} />
 
         {isPendingLike && (
           <section className="mt-6 border border-[#ded8ce] bg-[#fbfaf7] p-6">
-            {canRespondToCounterOffer ? (
-              <>
-                <p className="text-sm font-semibold text-[#183b3a]">Review {counterpart}&apos;s counter offer.</p>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <button type="button" disabled={busy} onClick={() => setCounterResponse("reject")} className="rounded-xl border border-[#d7d2c9] px-5 py-3 text-sm font-semibold text-[#62645f] disabled:opacity-60">
-                    Decline counter offer
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => setCounterResponse("accept")} className="rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
-                    Confirm and pay
-                  </button>
-                </div>
-                {canCancel && (
-                  <button type="button" onClick={() => setCancelOpen(true)} className="mt-4 rounded-xl border border-[#e85b43]/40 bg-[#fff0eb] px-5 py-3 text-sm font-semibold text-[#b33e2c]">
-                    Cancel this request
-                  </button>
-                )}
-              </>
-            ) : isSender ? (
+            {isSender ? (
               <>
                 <p className="text-sm text-[#62645f]">Waiting for {counterpart} to respond to your request.</p>
                 {canCancel && (
@@ -479,44 +444,7 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
                   <button type="button" disabled={busy} onClick={() => respond("accept")} className="rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                     {busy ? "Accepting..." : "Accept"}
                   </button>
-                  <button type="button" onClick={() => setShowCounterForm((value) => !value)} className="rounded-xl border border-[#d7d2c9] px-5 py-3 text-sm font-semibold text-[#183b3a]">
-                    Counter offer
-                  </button>
                 </div>
-                {showCounterForm && (
-                  <div className="mt-4 flex flex-wrap items-end gap-3">
-                    <label className="text-sm font-semibold text-[#183b3a]">
-                      New amount (₹)
-                      <input
-                        type="number"
-                        min={1}
-                        value={counterAmount}
-                        onChange={(event) => setCounterAmount(event.target.value)}
-                        className="mt-2 w-32 rounded-xl border border-[#d7d2c9] bg-white px-4 py-2 text-sm outline-none focus:border-[#e85b43]"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      disabled={busy || !Number(counterAmount)}
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          const { counterOfferParcelMatch } = await import("@/services/parcel-matches");
-                          await counterOfferParcelMatch(id, { baseAmount: Number(counterAmount) });
-                          setShowCounterForm(false);
-                          await refresh();
-                        } catch (requestError) {
-                          setError(requestError instanceof Error ? requestError.message : "Could not send counter-offer.");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className="rounded-xl bg-[#e85b43] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-                    >
-                      Send counter-offer
-                    </button>
-                  </div>
-                )}
               </>
             )}
           </section>
@@ -526,7 +454,7 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
           <section className="mt-6 border border-[#ded8ce] bg-[#fbfaf7] p-6">
             {isSender ? (
               <>
-                <p className="text-sm font-semibold text-[#183b3a]">Confirm and pay ₹{price}</p>
+                <p className="text-sm font-semibold text-[#183b3a]">Confirm and pay ₹{payableAmount}</p>
                 {!paymentOrder ? (
                   <button type="button" disabled={busy} onClick={startPayment} className="mt-4 rounded-xl bg-[#e85b43] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                     {busy ? "Redirecting to PayU..." : "Pay now"}
@@ -558,7 +486,7 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
           <section className="mt-6 border border-[#ded8ce] bg-[#fbfaf7] p-6">
             {isSender ? (
               <>
-                <p className="text-sm font-semibold text-[#183b3a]">Amount paid: ₹{price}</p>
+                <p className="text-sm font-semibold text-[#183b3a]">Amount paid: ₹{payableAmount}</p>
                 {handoffOtp ? (
                   <div className="mt-4 border-l-2 border-[#e7b65c] bg-white p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#62645f]">Pickup code</p>
@@ -720,35 +648,18 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
             )}
             {match.cancellation?.reason && <p className="mt-2 text-sm text-[#62645f]">{match.cancellation.reason}</p>}
             {isSender && match.cancellation?.refundStatus && (
-              <div
-                className={`mt-4 flex items-start gap-3 rounded-xl border px-4 py-3.5 ${
-                  match.cancellation.refundStatus === "refund_failed" ? "border-[#f2cabd] bg-[#fff0eb]" : "border-[#b7e4d4] bg-[#e1f5ee]"
-                }`}
-              >
-                {match.cancellation.refundStatus === "refund_failed" ? (
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-[#b33e2c]" />
-                ) : (
-                  <IndianRupee size={16} className="mt-0.5 shrink-0 text-[#085041]" />
-                )}
+              <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#b7e4d4] bg-[#e1f5ee] px-4 py-3.5">
+                <IndianRupee size={16} className="mt-0.5 shrink-0 text-[#085041]" />
                 <div>
-                  <p className={`text-sm font-semibold ${match.cancellation.refundStatus === "refund_failed" ? "text-[#b33e2c]" : "text-[#085041]"}`}>
-                    {match.cancellation.refundStatus === "refund_completed" && `₹${match.cancellation.refundAmount} refunded`}
-                    {(match.cancellation.refundStatus === "refund_pending" || match.cancellation.refundStatus === "refund_processing") &&
-                      `₹${match.cancellation.refundAmount} refund in progress`}
-                    {match.cancellation.refundStatus === "refund_failed" && `₹${match.cancellation.refundAmount} refund failed`}
+                  <p className="text-sm font-semibold text-[#085041]">
+                    {match.cancellation.refundStatus === "refund_completed"
+                      ? `₹${match.cancellation.refundAmount} refunded`
+                      : `₹${match.cancellation.refundAmount} refund in progress`}
                   </p>
-                  <p className={`mt-1 text-xs leading-5 ${match.cancellation.refundStatus === "refund_failed" ? "text-[#b33e2c]" : "text-[#085041]"}`}>
-                    {match.cancellation.refundStatus === "refund_completed" && "Already credited to your original payment method."}
-                    {(match.cancellation.refundStatus === "refund_pending" || match.cancellation.refundStatus === "refund_processing") &&
-                      "This can take a few days to reach your original payment method."}
-                    {match.cancellation.refundStatus === "refund_failed" && (
-                      <>
-                        {match.cancellation.refundFailureReason || "We couldn't process this refund automatically."}{" "}
-                        <Link href="/support" className="font-semibold underline">
-                          Contact support
-                        </Link>
-                      </>
-                    )}
+                  <p className="mt-1 text-xs leading-5 text-[#085041]">
+                    {match.cancellation.refundStatus === "refund_completed"
+                      ? "Already credited to your original payment method."
+                      : "Refunds typically take 2-3 business days to reach your original payment method."}
                   </p>
                 </div>
               </div>
@@ -769,7 +680,7 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
           isSender
             ? isEarlyCancellation(relevantDate)
               ? `You'll be refunded ₹${refund} in full — there is no cancellation fee.`
-              : `You'll be refunded ₹${refund} of ₹${price} — a ${Math.round(FEE_PCT * 100)}% fee applies for cancelling this close to pickup.`
+              : `You'll be refunded ₹${refund} of ₹${payableAmount} — a ${Math.round(FEE_PCT * 100)}% fee applies for cancelling this close to pickup.`
             : isEarlyCancellation(relevantDate)
               ? `${counterpart} will be fully refunded. This will not affect your reliability score.`
               : `${counterpart} will be fully refunded. This will be recorded against your reliability score.`
@@ -780,22 +691,11 @@ export default function ParcelRequestDetailsPage({ params }: { params: Promise<{
         loading={busy}
         onCancel={() => setCancelOpen(false)}
         onConfirm={cancel}
-      />
-      <ConfirmModal
-        open={counterResponse !== null}
-        title={counterResponse === "accept" ? "Confirm and pay for this counter offer?" : "Decline this counter offer?"}
-        message={
-          counterResponse === "accept"
-            ? `Confirm ${counterpart}'s counter offer of ₹${counterOfferAmount}? You'll be taken to secure payment before pickup is arranged.`
-            : `Decline ${counterpart}'s counter offer of ₹${counterOfferAmount}? This request will be closed.`
-        }
-        confirmLabel={busy ? (counterResponse === "accept" ? "Opening payment..." : "Declining...") : counterResponse === "accept" ? "Confirm and pay" : "Decline counter offer"}
-        cancelLabel="Review again"
-        destructive={counterResponse === "reject"}
-        loading={busy}
-        onCancel={() => setCounterResponse(null)}
-        onConfirm={confirmCounterResponse}
-      />
+      >
+        <Link href="/cancellation-policy" className="mt-3 inline-block text-xs font-semibold text-[#62645f] underline hover:text-[#1b1d1c]">
+          Cancellation & refund policy
+        </Link>
+      </ConfirmModal>
       <ConfirmModal
         open={deleteOpen}
         title="Delete past request?"

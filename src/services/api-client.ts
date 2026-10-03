@@ -62,6 +62,25 @@ const parseApiError = async (response: Response) => {
   throw error;
 };
 
+// Used for the file-upload routes during signup, where auth is a signup JWT
+// (returned as token.accessToken when validate_otp's isNewUser is true)
+// rather than the normal session access token — it has no refresh session
+// and must not carry X-Device-ID.
+export async function apiRequestWithAuth<T>(path: string, token: string, init?: RequestInit): Promise<T> {
+  const apiUrl = typeof window === "undefined" ? `${siteConfig.apiBaseUrl}${path}` : `/api${path}`;
+  const response = await fetch(apiUrl, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...init?.headers,
+    },
+  });
+  if (!response.ok) await parseApiError(response);
+  if (response.status === 204) return null as T;
+  return response.json() as Promise<T>;
+}
+
 export async function apiRequest<T>(path: string, init?: RequestInit, canRefresh = true): Promise<T> {
   const apiUrl = typeof window === "undefined" ? `${siteConfig.apiBaseUrl}${path}` : `/api${path}`;
   const accessToken = typeof window !== "undefined" ? window.localStorage.getItem(ACCESS_TOKEN_KEY) : null;

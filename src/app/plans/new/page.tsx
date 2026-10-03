@@ -1,12 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { LocationFields, inputClass, labelClass } from "@/components/forms/location-fields";
 import { useLocationPair } from "@/hooks/use-location-pair";
-import { createTravelPlan } from "@/services/travel-plans";
+import { createTravelPlan, previewTripPricing, type TravelPlanPricingPreview } from "@/services/travel-plans";
 import {
   ACCEPTED,
   ACCEPTED_API_TYPES,
@@ -67,6 +67,37 @@ export default function CreateTripPage() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(false);
+  const [pricingPreview, setPricingPreview] = useState<TravelPlanPricingPreview | null>(null);
+  const [pricingPreviewLoading, setPricingPreviewLoading] = useState(false);
+
+  // Live breakdown of what a sender would pay and what the traveler would
+  // actually take home for the price they're typing — computed server-side
+  // (see previewTripPricing) so the tiered markup/deduction math is never
+  // duplicated here.
+  useEffect(() => {
+    const amount = Number(price);
+    if (!price || !Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setPricingPreviewLoading(true);
+      previewTripPricing(amount)
+        .then((preview) => {
+          if (!cancelled) setPricingPreview(preview);
+        })
+        .catch(() => {
+          if (!cancelled) setPricingPreview(null);
+        })
+        .finally(() => {
+          if (!cancelled) setPricingPreviewLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [price]);
 
   const validateStep = (index: number) => {
     if (index === 0) {
@@ -87,6 +118,8 @@ export default function CreateTripPage() {
       if (!Number.isFinite(weight) || weight < 1 || weight > 20) return "Max weight must be between 1 and 20 kg.";
       const count = Number(maxParcelCount);
       if (!Number.isInteger(count) || count < 1 || count > 20) return "Max parcels must be a whole number between 1 and 20.";
+      const priceValue = Number(price);
+      if (!price || !Number.isFinite(priceValue) || priceValue <= 0) return "Set a price per package.";
       return "";
     }
     return "";
@@ -128,7 +161,7 @@ export default function CreateTripPage() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
         maxWeightKg: Number(maxWeight),
         maxParcelCount: Number(maxParcelCount),
-        pricePerPackage: price ? Number(price) : undefined,
+        pricePerPackage: Number(price),
         acceptedParcelTypes: [...new Set(acceptedParcelCategories.map((key) => ACCEPTED_API_TYPES[key]).filter(Boolean))],
         acceptedParcelCategories,
         restrictedParcelTypes: [...restricted],
@@ -356,10 +389,11 @@ export default function CreateTripPage() {
                   />
                 </label>
                 <label className={labelClass}>
-                  Price per package (optional)
+                  Price per package
                   <input
+                    required
                     type="number"
-                    min={0}
+                    min={1}
                     value={price}
                     onChange={(event) => setPrice(event.target.value)}
                     className={inputClass}
@@ -367,6 +401,19 @@ export default function CreateTripPage() {
                   />
                 </label>
               </div>
+              {Number(price) > 0 && (pricingPreviewLoading || pricingPreview) && (
+                <div className="rounded-xl border border-[#d7d2c9] bg-white p-4 text-sm">
+                  {pricingPreviewLoading && !pricingPreview ? (
+                    <p className="text-[#62645f]">Calculating…</p>
+                  ) : pricingPreview ? (
+                    <>
+                      <p className="text-xs uppercase tracking-[0.08em] text-[#62645f]">You take home</p>
+                      <p className="mt-0.5 text-lg font-semibold text-[#285c59]">₹{pricingPreview.travelerPayoutAmount}</p>
+                      <p className="mt-1 text-xs text-[#62645f]">per package, after platform fee</p>
+                    </>
+                  ) : null}
+                </div>
+              )}
             </div>
           )}
 
@@ -399,7 +446,7 @@ export default function CreateTripPage() {
                 </div>
                 <div>
                   <dt className="text-[#62645f]">Capacity</dt>
-                  <dd className="font-semibold text-[#183b3a]">{maxParcelCount} parcels · up to {maxWeight} kg{price ? ` · ₹${price}/package` : ""}</dd>
+                  <dd className="font-semibold text-[#183b3a]">{maxParcelCount} parcels · up to {maxWeight} kg · ₹{price}/package</dd>
                 </div>
                 <div>
                   <dt className="text-[#62645f]">Pickup</dt>

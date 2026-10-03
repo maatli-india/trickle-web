@@ -265,6 +265,7 @@ type HomeTraveller = {
   maxParcelCount?: number;
   acceptedParcelTypes?: string[];
   pricePerPackage?: number;
+  senderDisplayPricePerPackage?: number;
   name?: string;
   rating?: number;
 };
@@ -413,7 +414,7 @@ function AuthenticatedHome() {
       to: plan.to,
       departureDate: plan.departureDate,
       arrivalDate: plan.arrivalDate,
-      pricePerPackage: plan.pricePerPackage,
+      pricePerPackage: plan.senderDisplayPricePerPackage ?? plan.pricePerPackage,
     };
     window.sessionStorage.setItem(
       "trickle.web.selectedTraveller",
@@ -593,8 +594,8 @@ function AuthenticatedHome() {
                       {request.from?.address || "Origin"} → {request.to?.address || "Destination"}
                     </p>
                     <div className="mt-3 flex items-center justify-between border-t border-[#f0e6c9] pt-2">
-                      <span className="text-xs text-[#62645f]">Offered amount</span>
-                      <span className="text-sm font-semibold text-[#183b3a]">{request.agreedPrice || request.baseAmount ? `₹${request.agreedPrice || request.baseAmount}` : "Review offer"}</span>
+                      <span className="text-xs text-[#62645f]">You&apos;ll earn</span>
+                      <span className="text-sm font-semibold text-[#183b3a]">{request.travelerPayoutAmount ? `₹${request.travelerPayoutAmount}` : "Review offer"}</span>
                     </div>
                     <p className="mt-2 text-xs font-semibold text-[#e85b43]">Review request →</p>
                   </button>

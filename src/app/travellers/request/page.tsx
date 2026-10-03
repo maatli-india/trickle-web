@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BellRing, Check, PackageX } from "lucide-react";
+import { AlertTriangle, BellRing, Check, PackageX } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { apiRequest } from "@/services/api-client";
@@ -33,6 +33,7 @@ type Traveller = {
   maxWeightKg?: number;
   maxParcelCount?: number;
   pricePerPackage?: number;
+  senderDisplayPricePerPackage?: number;
   price?: number;
   pickupHandovers?: string[];
   pickupHandover?: string;
@@ -82,7 +83,7 @@ export default function TravellerRequestPage() {
           setSelection(parsed);
           setDescription(parsed.parcelNotes || "");
           setWeight(String(Math.min(1, Number(parsed.traveller.maxWeightKg) || 1)));
-          setAmount(String(parsed.traveller.pricePerPackage || parsed.traveller.price || ""));
+          setAmount(String(parsed.traveller.senderDisplayPricePerPackage ?? parsed.traveller.pricePerPackage ?? parsed.traveller.price ?? ""));
           setAcceptingNewRequests(parsed.traveller.acceptingNewRequests !== false);
         }
       } catch {
@@ -171,6 +172,7 @@ export default function TravellerRequestPage() {
 
   const { traveller, from, to, pickupDate } = selection;
   const travellerName = traveller.user?.name || traveller.name || "Traveller";
+  const defaultAmount = Number(traveller.senderDisplayPricePerPackage ?? traveller.pricePerPackage ?? traveller.price ?? 0);
   const rating = traveller.user?.rating ?? traveller.user?.ratings ?? traveller.rating ?? traveller.ratings;
   const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips ?? 0;
   const pickupOptions = getHandoverOptions(traveller, "pickupHandovers", "pickupHandover", PICKUP_HANDOVER_OPTIONS);
@@ -257,7 +259,7 @@ export default function TravellerRequestPage() {
           travelerName: travellerName,
           parcelType: category,
           parcelCategory: category,
-          baseAmount: Number(amount),
+          amount: Number(amount) * Math.max(1, numericPackageCount),
           from: { address: from.address, lat: Number(from.lat), lng: Number(from.lng) },
           to: { address: to.address, lat: Number(to.lat), lng: Number(to.lng) },
           targetDeliveryTime: pickupDate,
@@ -480,8 +482,28 @@ export default function TravellerRequestPage() {
 
                 <label className={labelClass}>
                   Your offer
+                  {defaultAmount > 0 && (
+                    <span className="mb-1.5 block text-xs font-normal normal-case tracking-normal text-[#8a8579]">
+                      Prefilled from {travellerName.split(" ")[0]}&apos;s price of ₹{defaultAmount} per package — not a total. Adjust it if you&apos;re sending more than one package.
+                    </span>
+                  )}
                   <input required type="number" min={1} value={amount} onChange={(event) => setAmount(event.target.value)} className={inputClass} placeholder="₹" />
                 </label>
+
+                {Number(amount) > 0 && numericPackageCount > 1 && (
+                  <p className="inline-block w-fit rounded-full bg-[#e5f0eb] px-3 py-1.5 text-xs font-semibold text-[#285c59]">
+                    ₹{amount} × {numericPackageCount} packages = ₹{Number(amount) * numericPackageCount} total
+                  </p>
+                )}
+
+                {defaultAmount > 0 && Number(amount) > 0 && Number(amount) < defaultAmount && (
+                  <p className="flex items-start gap-2 rounded-lg bg-[#fff4d8] px-3.5 py-2.5 text-xs leading-5 text-[#7a5310]">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>
+                      This is below {travellerName.split(" ")[0]}&apos;s listed price of ₹{defaultAmount} — not a hard rule, but offers below it are more likely to get declined.
+                    </span>
+                  </p>
+                )}
 
                 <label className={labelClass}>
                   Message to traveller (optional)

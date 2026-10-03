@@ -5,19 +5,9 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getWebProfile, hasAccessToken, logoutWebSession } from "@/services/auth";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Avatar } from "@/components/ui/avatar";
 
 const subscribe = () => () => {};
-
-function DefaultAvatar({ className = "size-10" }: { className?: string }) {
-  return (
-    <span className={`grid ${className} shrink-0 place-items-center rounded-full bg-[#e7b65c] text-[#183b3a]`} aria-hidden="true">
-      <svg viewBox="0 0 24 24" className="size-6 fill-current" role="presentation">
-        <circle cx="12" cy="8" r="3.25" />
-        <path d="M5.5 20a6.5 6.5 0 0 1 13 0H5.5Z" />
-      </svg>
-    </span>
-  );
-}
 
 const getDisplayName = (profileValue: string | null) => {
   if (!profileValue) return "User";
@@ -26,6 +16,16 @@ const getDisplayName = (profileValue: string | null) => {
     return profile.name?.trim() || "User";
   } catch {
     return "User";
+  }
+};
+
+const getProfileUserId = (profileValue: string | null) => {
+  if (!profileValue) return "";
+  try {
+    const profile = JSON.parse(profileValue) as { id?: string; userId?: string; _id?: string };
+    return String(profile.id || profile.userId || profile._id || "");
+  } catch {
+    return "";
   }
 };
 
@@ -45,6 +45,7 @@ export function SiteHeader() {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const displayName = getDisplayName(profileValue);
+  const profileUserId = getProfileUserId(profileValue);
 
   const logout = async () => {
     setLoggingOut(true);
@@ -102,7 +103,7 @@ export function SiteHeader() {
         )}
         {authenticated ? (
           <button type="button" onClick={() => setMenuOpen(true)} className="flex items-center gap-3 rounded-full border border-[#ded8ce] bg-[#fbfaf7] py-1.5 pl-1.5 pr-4 text-left transition hover:border-[#e85b43]" aria-label="Open account menu">
-            <DefaultAvatar className="size-9" />
+            <Avatar userId={profileUserId} name={displayName} className="size-9" />
             <span className="hidden max-w-32 truncate text-sm font-semibold text-[#183b3a] sm:block">{displayName}</span>
             <span className="text-xs text-[#e85b43]" aria-hidden="true">▼</span>
           </button>
@@ -115,7 +116,7 @@ export function SiteHeader() {
           <aside className="ml-auto flex min-h-full w-full max-w-sm flex-col bg-[#fbfaf7] shadow-2xl" role="dialog" aria-label="Account menu" onClick={(event) => event.stopPropagation()}>
             <div className="bg-[#183b3a] px-7 pb-7 pt-5 text-white">
               <button type="button" onClick={() => setMenuOpen(false)} className="ml-auto block text-xl text-[#e7b65c]" aria-label="Close menu">X</button>
-              <DefaultAvatar className="mt-4 size-16" />
+              <Avatar userId={profileUserId} name={displayName} className="mt-4 size-16" />
               <p className="mt-4 text-lg font-semibold">{displayName}</p>
               <p className="mt-1 text-sm text-[#c5d4ce]">User Account</p>
             </div>

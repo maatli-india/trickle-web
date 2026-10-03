@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { AccountPage } from "@/components/account/account-page";
+import { Avatar } from "@/components/ui/avatar";
 import { apiRequest } from "@/services/api-client";
-import { getWebProfile } from "@/services/auth";
+import { getWebProfile, getWebUserId } from "@/services/auth";
+import { deleteMyProfilePic, uploadProfilePic, waitForAvatarUrl } from "@/services/files";
 
 type NotificationPreferences = { pushEnabled?: boolean; emailUpdatesEnabled?: boolean };
 type Profile = { name: string; email: string; phone: string; phoneExt: string; gender: string; dob: string; notificationPreferences: NotificationPreferences };
@@ -25,6 +27,50 @@ export default function AccountSettingsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const userId = getWebUserId();
+  const [avatarRefreshKey, setAvatarRefreshKey] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoStatus, setPhotoStatus] = useState("");
+  const [photoError, setPhotoError] = useState("");
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const pickPhoto = () => photoInputRef.current?.click();
+
+  const uploadPhoto = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (photoInputRef.current) photoInputRef.current.value = "";
+    if (!file) return;
+    setPhotoBusy(true);
+    setPhotoError("");
+    setPhotoStatus("Uploading your photo...");
+    try {
+      const status = await uploadProfilePic(file);
+      if (status.status !== "READY") throw new Error("Your photo could not be processed. Please try a different image.");
+      setPhotoStatus("Finishing up...");
+      if (userId) await waitForAvatarUrl(userId);
+      setAvatarRefreshKey((key) => key + 1);
+    } catch (requestError) {
+      setPhotoError(requestError instanceof Error ? requestError.message : "Could not upload your photo.");
+    } finally {
+      setPhotoBusy(false);
+      setPhotoStatus("");
+    }
+  };
+
+  const removePhoto = async () => {
+    setPhotoBusy(true);
+    setPhotoError("");
+    try {
+      await deleteMyProfilePic();
+      setAvatarRefreshKey((key) => key + 1);
+    } catch (requestError) {
+      const status = (requestError as { status?: number })?.status;
+      if (status === 404) setAvatarRefreshKey((key) => key + 1);
+      else setPhotoError(requestError instanceof Error ? requestError.message : "Could not remove your photo.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
 
   useEffect(() => {
     apiRequest<Profile>("/v1/users/me")
@@ -57,6 +103,24 @@ export default function AccountSettingsPage() {
         <div className="h-[3px] bg-[#e85b43]" />
         <div className="space-y-8 p-6 sm:p-10">
           <div>
+            <h2 className="text-lg font-semibold tracking-[-0.01em] text-[#183b3a]">Profile photo</h2>
+            <p className="mt-1 text-sm text-[#8a8579]">Shown to travelers and senders you&apos;re matched with.</p>
+            <div className="mt-5 flex items-center gap-4">
+              <Avatar userId={userId} name={profile.name} className="size-16" refreshKey={avatarRefreshKey} />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={pickPhoto} disabled={photoBusy} className="rounded-xl border border-[#d7d2c9] bg-white px-4 py-2.5 text-sm font-semibold text-[#183b3a] hover:border-[#e85b43] disabled:opacity-60">
+                  {photoBusy ? (photoStatus || "Working...") : "Change photo"}
+                </button>
+                <button type="button" onClick={removePhoto} disabled={photoBusy} className="rounded-xl border border-[#d7d2c9] bg-white px-4 py-2.5 text-sm font-semibold text-[#b33e2c] hover:border-[#e85b43] disabled:opacity-60">
+                  Remove
+                </button>
+                <input ref={photoInputRef} type="file" accept="image/*" onChange={uploadPhoto} className="hidden" />
+              </div>
+            </div>
+            {photoError && <p role="alert" className="mt-3 text-sm text-[#b33e2c]">{photoError}</p>}
+          </div>
+
+          <div className="border-t border-[#eee9e1] pt-8">
             <h2 className="text-lg font-semibold tracking-[-0.01em] text-[#183b3a]">Personal information</h2>
             <p className="mt-1 text-sm text-[#8a8579]">This is how travelers and senders will recognize you.</p>
             <div className="mt-5 space-y-5">

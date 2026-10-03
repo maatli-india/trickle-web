@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { SiteFooter } from "@/components/layout/site-footer";
@@ -11,7 +11,19 @@ import { acknowledgePayment } from "@/services/parcel-matches";
 // /v1/payments/payu/return/{outcome} -> here). Money is already settled (or
 // not) via PayU's webhook independently of this page — acknowledgePayment
 // only records that the user saw the outcome, it never marks a payment paid.
+//
+// useSearchParams() opts the page out of static rendering unless it's
+// wrapped in its own Suspense boundary — next build's prerender step fails
+// outright without this (see PaymentResultContent below).
 export default function PaymentResultPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#f6f2eb]" />}>
+      <PaymentResultContent />
+    </Suspense>
+  );
+}
+
+function PaymentResultContent() {
   const searchParams = useSearchParams();
   const status = searchParams.get("status") === "success" ? "success" : "failure";
   const transactionId = searchParams.get("transactionId") || "";

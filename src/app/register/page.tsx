@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createUser, generateOtp, validateOtp } from "@/services/auth";
+import { uploadProfilePic } from "@/services/files";
 
 type Step = "phone" | "otp" | "profile";
 type Gender = "male" | "female" | "other";
@@ -22,9 +23,20 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [gender, setGender] = useState<Gender | "">("");
   const [dob, setDob] = useState("");
+  const [signupToken, setSignupToken] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [photoStatus, setPhotoStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
+
+  const pickPhoto = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
 
   const submitPhone = async (event: FormEvent) => {
     event.preventDefault();
@@ -71,6 +83,10 @@ export default function RegisterPage() {
         router.replace("/");
         return;
       }
+      // For a new user, token.accessToken here is a signup JWT (no refresh
+      // session) — it authenticates the profile-picture upload below, then
+      // createUser below finishes registration and issues real session tokens.
+      setSignupToken(response.token?.accessToken || "");
       setStep("profile");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "The OTP could not be verified.");
@@ -89,6 +105,17 @@ export default function RegisterPage() {
     setError("");
     setLoading(true);
     try {
+      let profilePicId: string | undefined;
+      if (photoFile) {
+        setPhotoStatus("Uploading your photo...");
+        try {
+          const status = await uploadProfilePic(photoFile, signupToken);
+          if (status.status === "READY") profilePicId = status.fileId;
+          else setPhotoStatus("Your photo could not be processed — you can add one later from settings.");
+        } catch {
+          setPhotoStatus("Your photo could not be uploaded — you can add one later from settings.");
+        }
+      }
       await createUser({
         name: fullName.trim(),
         email: email.trim(),
@@ -96,12 +123,14 @@ export default function RegisterPage() {
         phoneExt: "+91",
         gender,
         dob: formatApiDate(dob),
+        ...(profilePicId ? { profilePicId } : {}),
       });
       router.replace("/");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not create your account.");
     } finally {
       setLoading(false);
+      setPhotoStatus("");
     }
   };
 
@@ -168,12 +197,28 @@ export default function RegisterPage() {
 
             {step === "profile" && (
               <form onSubmit={submitProfile} className="space-y-5">
+                <label className="block text-sm font-semibold">
+                  Profile photo <span className="font-normal text-[#8a8579]">(optional)</span>
+                  <div className="mt-2 flex items-center gap-4">
+                    {photoPreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- local object URL preview, not a remote image
+                      <img src={photoPreview} alt="Selected profile" className="size-16 shrink-0 rounded-full object-cover" />
+                    ) : (
+                      <span className="grid size-16 shrink-0 place-items-center rounded-full bg-[#f0ece3] text-xs font-semibold text-[#8a8579]">No photo</span>
+                    )}
+                    <label className="cursor-pointer rounded-xl border border-[#d7d2c9] bg-white px-4 py-2.5 text-sm font-semibold text-[#183b3a] hover:border-[#e85b43]">
+                      {photoFile ? "Change photo" : "Choose photo"}
+                      <input type="file" accept="image/*" onChange={pickPhoto} className="hidden" />
+                    </label>
+                  </div>
+                </label>
                 <label className="block text-sm font-semibold">Full name<input value={fullName} onChange={(event) => setFullName(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3.5 font-normal outline-none focus:border-[#e85b43]" autoComplete="name" /></label>
                 <label className="block text-sm font-semibold">Email<input value={email} onChange={(event) => setEmail(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3.5 font-normal outline-none focus:border-[#e85b43]" type="email" autoComplete="email" /></label>
                 <div><p className="text-sm font-semibold">Gender</p><div className="mt-2 grid grid-cols-3 gap-2">{(["male", "female", "other"] as Gender[]).map((option) => <button type="button" key={option} onClick={() => setGender(option)} className={`rounded-xl border px-3 py-3 text-sm capitalize transition ${gender === option ? "border-[#e85b43] bg-[#fff0eb] text-[#b33e2c]" : "border-[#d7d2c9] bg-white text-[#62645f] hover:border-[#e85b43]"}`}>{option}</button>)}</div></div>
                 <label className="block text-sm font-semibold">Date of birth<input value={dob} onChange={(event) => setDob(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3.5 font-normal outline-none focus:border-[#e85b43]" type="date" max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().slice(0, 10)} /></label>
                 <label className="block text-sm font-semibold">Phone number<input value={`+91 ${phone}`} disabled className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-[#f3f0ea] px-4 py-3.5 font-normal text-[#62645f]" /></label>
-                <button disabled={loading} className="w-full rounded-xl bg-[#e85b43] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#cf4935] disabled:cursor-wait disabled:opacity-60">{loading ? "Creating profile..." : "Create my profile"}</button>
+                {photoStatus && <p className="text-sm text-[#62645f]">{photoStatus}</p>}
+                <button disabled={loading} className="w-full rounded-xl bg-[#e85b43] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#cf4935] disabled:cursor-wait disabled:opacity-60">{loading ? (photoFile ? "Uploading photo..." : "Creating profile...") : "Create my profile"}</button>
               </form>
             )}
           </section>

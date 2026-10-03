@@ -16,7 +16,7 @@ export type TravelPlanPayload = {
   timezone?: string;
   additionalInfo?: string;
   maxWeightKg?: number;
-  pricePerPackage?: number;
+  pricePerPackage: number;
   maxParcelCount?: number;
   acceptingNewRequests?: boolean;
   acceptedParcelTypes?: string[];
@@ -86,6 +86,19 @@ export const searchTravelPlans = (params: {
   page?: number;
   limit?: number;
 }) => apiRequest(`/v1/travel-plans/search${buildQuery(params)}`);
+
+export type TravelPlanPricingPreview = {
+  pricePerPackage: number;
+  senderDisplayAmount: number;
+  travelerPayoutAmount: number;
+};
+
+// previewTripPricing lets a traveler see what a sender would be shown and
+// what they'd actually take home for a candidate price, before saving the
+// trip — mirrors the server's real payout math (see transitorder's
+// computeAmountViews) rather than duplicating tier logic client-side.
+export const previewTripPricing = (pricePerPackage: number) =>
+  apiRequest<TravelPlanPricingPreview>(`/v1/travel-plans/price-preview${buildQuery({ pricePerPackage })}`);
 
 export const searchTravelPlansStartingOnDate = (params: {
   lat: number;
