@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Avatar } from "@/components/ui/avatar";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -19,7 +20,7 @@ import { respondToCounterOffer } from "@/services/parcel-matches";
 import { extractListItems, extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { canEditTrip, canCancelOrDeleteTrip, isTripPast } from "@/lib/trip-status";
 import { RESPONDABLE_STATUSES, effectiveStatus, getRequestStatusLabel } from "@/lib/parcel-status";
-import { avatarTint, initials } from "@/lib/home-constants";
+import { formatCategory } from "@/lib/format-category";
 
 const modeLabel = (mode?: string) => ({ by_flight: "Flight", by_train: "Train", by_road: "Road" }[mode || ""] || "Travel");
 const formatDateTime = (value?: string) => {
@@ -215,6 +216,21 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
           )}
         </section>
 
+        {(past || status === "completed" || status === "cancelled") && (
+          <Link
+            href={`/plans/new?repeatFrom=${plan.id}`}
+            className="mt-6 flex items-start gap-3 rounded-xl border border-[#bbd7f0] bg-[#e6f1fb] p-4 hover:border-[#0c447c]"
+          >
+            <span className="mt-0.5 text-lg">↻</span>
+            <span>
+              <span className="block text-sm font-semibold text-[#0c447c]">Run this route often?</span>
+              <span className="mt-0.5 block text-xs leading-5 text-[#4a6a8a]">
+                Repeat this trip to post it again with the same route, mode and price — just pick a new date.
+              </span>
+            </span>
+          </Link>
+        )}
+
         {error && <p role="alert" className="mt-6 rounded-xl border border-[#e85b43]/30 bg-[#fff0eb] px-4 py-3 text-sm text-[#b33e2c]">{error}</p>}
 
         <section className="mt-6 grid grid-cols-3 gap-3">
@@ -330,15 +346,10 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
                 <>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
-                      <span
-                        className="grid size-10 shrink-0 place-items-center rounded-full text-xs font-bold"
-                        style={{ backgroundColor: avatarTint(senderName).bg, color: avatarTint(senderName).fg }}
-                      >
-                        {initials(senderName)}
-                      </span>
+                      <Avatar userId={request.senderUserId} name={senderName} className="size-10 text-xs" />
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-[#183b3a]">{senderName}</p>
-                        <p className="truncate text-sm text-[#62645f]">{request.parcelDescription || request.parcelCategory || "Parcel request"}</p>
+                        <p className="truncate text-sm text-[#62645f]">{request.parcelDescription || formatCategory(request.parcelCategory) || "Parcel request"}</p>
                       </div>
                     </div>
                     <p className="shrink-0 text-sm font-semibold text-[#285c59]">

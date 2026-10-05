@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, BellRing, Check, PackageX } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
+import { Avatar } from "@/components/ui/avatar";
 import { apiRequest } from "@/services/api-client";
 import { listParcelMatches } from "@/services/parcel-matches";
 import { getTravelPlanInterest, recordTravelPlanView, registerTravelPlanInterest } from "@/services/travel-plans";
@@ -28,6 +29,8 @@ type Traveller = {
   completedTrips?: number;
   totalCount?: number;
   departureDate?: string;
+  arrivalDate?: string;
+  travelMode?: string;
   from?: Location;
   to?: Location;
   maxWeightKg?: number;
@@ -45,7 +48,11 @@ type Traveller = {
 
 type Selection = { traveller: Traveller; from: Location; to: Location; pickupDate: string; parcelNotes?: string };
 
-const formatDate = (value?: string) => (value ? new Date(value).toLocaleString() : "Not provided");
+const formatDate = (value?: string) => {
+  if (!value) return "Not provided";
+  const date = new Date(String(value).replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
 const maxParcelImageSize = 1024 * 1024;
 
 export default function TravellerRequestPage() {
@@ -172,6 +179,7 @@ export default function TravellerRequestPage() {
 
   const { traveller, from, to, pickupDate } = selection;
   const travellerName = traveller.user?.name || traveller.name || "Traveller";
+  const travelerUserId = traveller.travelerUserId || traveller.travelerId || traveller.userId || traveller.user?.id;
   const defaultAmount = Number(traveller.senderDisplayPricePerPackage ?? traveller.pricePerPackage ?? traveller.price ?? 0);
   const rating = traveller.user?.rating ?? traveller.user?.ratings ?? traveller.rating ?? traveller.ratings;
   const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips ?? 0;
@@ -317,7 +325,10 @@ export default function TravellerRequestPage() {
           <div className="space-y-6">
             <div className="bg-[#fbfaf7] p-6 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e85b43]">Traveller selected</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#183b3a]">{travellerName}</h2>
+              <div className="mt-2 flex items-center gap-3">
+                <Avatar userId={travelerUserId} name={travellerName} className="size-12" />
+                <h2 className="text-2xl font-semibold text-[#183b3a]">{travellerName}</h2>
+              </div>
               <p className="mt-2 text-sm text-[#62645f]">
                 ★ {rating ?? "Not rated"} <span className="px-1">·</span> {completedTrips} completed trips
               </p>
@@ -327,6 +338,8 @@ export default function TravellerRequestPage() {
                 </p>
                 <p className="mt-3 text-[#62645f]">Pickup date: {selection.pickupDate || "Not provided"}</p>
                 <p className="mt-2 text-[#62645f]">Departure: {formatDate(selection.traveller.departureDate)}</p>
+                <p className="mt-2 text-[#62645f]">Arrival: {formatDate(selection.traveller.arrivalDate)}</p>
+                <p className="mt-2 capitalize text-[#62645f]">Travel mode: {selection.traveller.travelMode?.replace("by_", " ") || "Not provided"}</p>
                 <p className="mt-2 text-[#62645f]">Capacity: up to {maxWeight} kg · {maxPackages} parcels</p>
               </div>
             </div>

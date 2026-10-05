@@ -198,6 +198,18 @@ export const fetchParcelPhotoUrl = async (matchId: string, fileId: string): Prom
   }
 };
 
+// Same redirect-resolution pattern as fetchParcelPhotoUrl, but for the
+// photos a traveler attaches when declining at pickup inspection.
+export const fetchDeclineEvidenceUrl = async (matchId: string, fileId: string): Promise<string | null> => {
+  if (typeof window === "undefined") return null;
+  try {
+    const result = await apiRequest<{ url?: string }>(`/decline-evidence/${encodeURIComponent(matchId)}/${encodeURIComponent(fileId)}`);
+    return result?.url || null;
+  } catch {
+    return null;
+  }
+};
+
 export const deleteParcelMatchFile = (matchId: string, fileId: string) =>
   apiRequest<{ message?: string }>(`/v1/parcel-matches/${encodeURIComponent(matchId)}/files/${encodeURIComponent(fileId)}`, {
     method: "DELETE",

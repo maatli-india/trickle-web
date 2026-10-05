@@ -4,15 +4,44 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
+import { Avatar } from "@/components/ui/avatar";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { listParcelMatches, respondToCounterOffer } from "@/services/parcel-matches";
-import { extractListItems, type ParcelMatch } from "@/types/travel";
+import { getTravelPlanById } from "@/services/travel-plans";
+import { extractListItems, extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { bucketRequestStatus, effectiveStatus, formatMoney, getRequestStatusLabel, relevantMatchDate } from "@/lib/parcel-status";
-import { avatarTint, initials } from "@/lib/home-constants";
+import { formatCategory } from "@/lib/format-category";
 
 type Tab = "sent" | "received";
 
 const DECLINE_REASONS = ["Already at capacity", "Route or timing doesn't work", "Other"];
+
+const formatDateTime = (value?: string) => {
+  if (!value) return "Not provided";
+  const date = new Date(String(value).replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
+
+const addTravelTiming = async (requests: ParcelMatch[]) => {
+  const planIds = [...new Set(requests.map((request) => request.travelPlanId).filter(Boolean))] as string[];
+  const plans = new Map<string, TravelPlan>();
+  await Promise.all(
+    planIds.map(async (planId) => {
+      try {
+        const plan = extractOneItem<TravelPlan>(await getTravelPlanById(planId));
+        if (plan) plans.set(planId, plan);
+      } catch {
+        // Keep the request card usable when a trip is no longer accessible.
+      }
+    }),
+  );
+  return requests.map((request) => {
+    const plan = request.travelPlanId ? plans.get(request.travelPlanId) : undefined;
+    return plan
+      ? { ...request, departureDate: request.departureDate || plan.departureDate, arrivalDate: request.arrivalDate || plan.arrivalDate }
+      : request;
+  });
+};
 
 export default function RequestsPage() {
   const [tab, setTab] = useState<Tab>("sent");
@@ -29,9 +58,9 @@ export default function RequestsPage() {
     Promise.allSettled([
       listParcelMatches({ side: "sender", page: 1, limit: 100 }),
       listParcelMatches({ side: "traveler", page: 1, limit: 100 }),
-    ]).then(([sentResult, receivedResult]) => {
-      if (sentResult.status === "fulfilled") setSent(extractListItems<ParcelMatch>(sentResult.value as never));
-      if (receivedResult.status === "fulfilled") setReceived(extractListItems<ParcelMatch>(receivedResult.value as never));
+    ]).then(async ([sentResult, receivedResult]) => {
+      if (sentResult.status === "fulfilled") setSent(await addTravelTiming(extractListItems<ParcelMatch>(sentResult.value as never)));
+      if (receivedResult.status === "fulfilled") setReceived(await addTravelTiming(extractListItems<ParcelMatch>(receivedResult.value as never)));
       if (sentResult.status === "rejected" && receivedResult.status === "rejected") setError("We could not load your requests right now.");
       setLoading(false);
     });
@@ -106,18 +135,21 @@ export default function RequestsPage() {
         <Link href={`/requests/${request.id}?role=${role}`} className="block">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-3">
-              <span
-                className="grid size-10 shrink-0 place-items-center rounded-full text-xs font-bold"
-                style={{ backgroundColor: avatarTint(counterpart).bg, color: avatarTint(counterpart).fg }}
-              >
-                {initials(counterpart)}
-              </span>
+              <Avatar
+                userId={tab === "sent" ? request.travelerUserId : request.senderUserId}
+                name={counterpart}
+                className="size-10 text-xs"
+              />
               <div className="min-w-0">
                 <p className="truncate font-semibold text-[#183b3a]">{counterpart}</p>
-                <p className="mt-1 truncate text-sm text-[#62645f]">{request.parcelDescription || request.parcelCategory || "Parcel request"}</p>
+                <p className="mt-1 truncate text-sm text-[#62645f]">{request.parcelDescription || formatCategory(request.parcelCategory) || "Parcel request"}</p>
                 <p className="mt-2 truncate text-xs text-[#62645f]">
                   {request.from?.address || "Pickup"} <span className="px-1 text-[#e85b43]">→</span> {request.to?.address || "Destination"}
                 </p>
+                <div className="mt-2 grid gap-1 text-xs text-[#62645f] sm:grid-cols-2">
+                  <p>Departure · {formatDateTime(request.departureDate)}</p>
+                  <p>Arrival · {formatDateTime(request.arrivalDate)}</p>
+                </div>
               </div>
             </div>
             <p className="shrink-0 text-sm font-semibold text-[#285c59]">{formatMoney(displayAmount)}</p>

@@ -91,6 +91,7 @@ export type ParcelMatch = {
   to: Location;
   targetDeliveryTime?: string;
   departureDate?: string;
+  arrivalDate?: string;
   parcelDescription?: string;
   parcelCategory?: string;
   parcelSubcategory?: string;
@@ -109,10 +110,25 @@ export type ParcelMatch = {
   receiverUserId?: string;
   offerHistory?: OfferHistoryEntry[];
   paymentRef?: { status?: string };
+  // Set only when a traveler declines at pickup inspection
+  // (AcknowledgeInspection, Accepted:false) — status lands on
+  // cancelled_by_traveler same as a normal self-serve cancel, but
+  // `cancellation` below stays unset on this path; these are the only
+  // fields that carry the real reason/evidence for it.
+  disputeReason?: string;
+  declineReasonCode?: string;
+  declineEvidenceImageIds?: string[];
+  // Set only when the traveler themselves reported interrupt_in_transit
+  // (ResolveException) — traveler-only in the API response (NewParcelMatchView
+  // only copies it onto the view for that role), never present for a sender
+  // viewing the same match.
+  exceptionReason?: string;
   cancellation?: {
     cancelledBy?: string;
     cancelledByName?: string;
     reason?: string;
+    reasonCode?: string;
+    policy?: string;
     refundAmount?: number;
     refundStatus?: "refund_pending" | "refund_processing" | "refund_completed" | "refund_failed";
     refundTransactionId?: string;

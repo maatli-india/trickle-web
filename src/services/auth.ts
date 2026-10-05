@@ -11,7 +11,7 @@ const createDeviceId = () => {
   return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-const buildDeviceDetails = () => ({
+export const buildDeviceDetails = () => ({
   appVersion: "1.0.0",
   token: "web",
   os: "web",

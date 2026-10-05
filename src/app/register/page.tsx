@@ -217,6 +217,9 @@ export default function RegisterPage() {
                 <div><p className="text-sm font-semibold">Gender</p><div className="mt-2 grid grid-cols-3 gap-2">{(["male", "female", "other"] as Gender[]).map((option) => <button type="button" key={option} onClick={() => setGender(option)} className={`rounded-xl border px-3 py-3 text-sm capitalize transition ${gender === option ? "border-[#e85b43] bg-[#fff0eb] text-[#b33e2c]" : "border-[#d7d2c9] bg-white text-[#62645f] hover:border-[#e85b43]"}`}>{option}</button>)}</div></div>
                 <label className="block text-sm font-semibold">Date of birth<input value={dob} onChange={(event) => setDob(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3.5 font-normal outline-none focus:border-[#e85b43]" type="date" max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().slice(0, 10)} /></label>
                 <label className="block text-sm font-semibold">Phone number<input value={`+91 ${phone}`} disabled className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-[#f3f0ea] px-4 py-3.5 font-normal text-[#62645f]" /></label>
+                <p className="text-xs leading-5 text-[#8a8579]">
+                  Enter your name, gender, and date of birth exactly as they appear on your Aadhaar — you&apos;ll need this to match during identity verification. These details, along with your phone number, can&apos;t be edited later without contacting support.
+                </p>
                 {photoStatus && <p className="text-sm text-[#62645f]">{photoStatus}</p>}
                 <button disabled={loading} className="w-full rounded-xl bg-[#e85b43] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#cf4935] disabled:cursor-wait disabled:opacity-60">{loading ? (photoFile ? "Uploading photo..." : "Creating profile...") : "Create my profile"}</button>
               </form>
