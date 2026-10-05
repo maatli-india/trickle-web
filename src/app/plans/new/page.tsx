@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { LocationFields, inputClass, labelClass } from "@/components/forms/location-fields";
 import { useLocationPair } from "@/hooks/use-location-pair";
-import { createTravelPlan, previewTripPricing, type TravelPlanPricingPreview } from "@/services/travel-plans";
+import { createTravelPlan, getTravelPlanById, previewTripPricing, type TravelPlanPricingPreview } from "@/services/travel-plans";
+import { extractOneItem, type TravelPlan } from "@/types/travel";
 import {
   ACCEPTED,
   ACCEPTED_API_TYPES,
@@ -17,6 +18,7 @@ import {
   PICKUP_API_TYPES,
   RESTRICTED,
   apiDate,
+  tripFormPrefillFromPlan,
 } from "@/lib/trip-form-constants";
 
 const STEP_NAMES = ["Route & schedule", "Pickup & delivery", "What you carry", "Review & publish"];
@@ -50,8 +52,21 @@ function ChipToggle({
   );
 }
 
+// useSearchParams() opts the page out of static rendering unless it's
+// wrapped in its own Suspense boundary — next build's prerender step fails
+// outright without this (same pattern as requests/[id]/page.tsx).
 export default function CreateTripPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#f6f2eb]" />}>
+      <CreateTripContent />
+    </Suspense>
+  );
+}
+
+function CreateTripContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const repeatFrom = searchParams.get("repeatFrom");
   const { from, setFrom, to, setTo, locationError } = useLocationPair();
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState("flight");
@@ -69,6 +84,34 @@ export default function CreateTripPage() {
   const [published, setPublished] = useState(false);
   const [pricingPreview, setPricingPreview] = useState<TravelPlanPricingPreview | null>(null);
   const [pricingPreviewLoading, setPricingPreviewLoading] = useState(false);
+
+  // "Repeat this trip" (the plan details page) passes the source plan's id
+  // here — everything except date/time is pre-filled from it, so the
+  // traveler reviews/tweaks the same 4-step flow instead of starting blank.
+  useEffect(() => {
+    if (!repeatFrom) return;
+    let active = true;
+    getTravelPlanById(repeatFrom).then((response) => {
+      if (!active) return;
+      const plan = extractOneItem<TravelPlan>(response);
+      if (!plan) return;
+      const prefill = tripFormPrefillFromPlan(plan);
+      setFrom(prefill.from);
+      setTo(prefill.to);
+      setMode(prefill.mode);
+      setPickup(prefill.pickup);
+      setDelivery(prefill.delivery);
+      setAccepted(prefill.accepted);
+      setRestricted(prefill.restricted);
+      setMaxWeight(prefill.maxWeight);
+      setMaxParcelCount(prefill.maxParcelCount);
+      setPrice(prefill.price);
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repeatFrom]);
 
   // Live breakdown of what a sender would pay and what the traveler would
   // actually take home for the price they're typing — computed server-side

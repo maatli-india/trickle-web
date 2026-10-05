@@ -13,14 +13,15 @@ import {
   Phone,
   Reply,
   Send,
-  ShieldCheck,
   Star,
   X,
 } from "lucide-react";
+import { Avatar } from "@/components/ui/avatar";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { extractOneItem, type ParcelMatch } from "@/types/travel";
+import { formatCategory } from "@/lib/format-category";
 import { getParcelMatch } from "@/services/parcel-matches";
 import { fetchChatFileUrl, uploadChatImage } from "@/services/files";
 import { apiRequest } from "@/services/api-client";
@@ -70,8 +71,6 @@ const mergeMessages = (current: ChatMessage[], incoming: ChatMessage[]) => {
     (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
   );
 };
-
-const initials = (name: string) => name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "U";
 
 const formatTime = (value: string) => {
   const date = new Date(value);
@@ -167,7 +166,7 @@ function ChatPageContent({ id }: { id: string }) {
     if (!match) return isSender ? "Traveller" : "Sender";
     return (isSender ? match.travelerName : match.senderName) || (isSender ? "Traveller" : "Sender");
   }, [isSender, match]);
-  const parcelLabel = match?.parcelDescription || match?.parcelCategory || "Parcel";
+  const parcelLabel = match?.parcelDescription || formatCategory(match?.parcelCategory) || "Parcel";
   const routeLabel = match?.from?.address && match?.to?.address ? `${match.from.address} -> ${match.to.address}` : "";
   const myBubbleColor = isSender ? "#101828" : "#0F6E56";
 
@@ -556,9 +555,9 @@ function ChatPageContent({ id }: { id: string }) {
         </Link>
         <section className="mt-6 flex min-h-[min(720px,calc(100vh-190px))] flex-1 flex-col overflow-hidden border border-[#ded8ce] bg-[#F5F7FA] shadow-[0_18px_50px_rgba(20,30,50,0.12)]">
           <div className="flex items-center gap-3 border-b border-[#E4E8F0] bg-white px-5 py-4 sm:px-7">
-            <span className="grid size-11 shrink-0 place-items-center rounded-full bg-[#171E3A] text-xs font-bold text-[#F5A623]">{initials(counterpart)}</span>
+            <Avatar userId={counterpartId} name={counterpart} className="size-11" />
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5"><h1 className="truncate font-[Sora,sans-serif] text-lg font-bold text-[#1B2230]">{counterpart}</h1><ShieldCheck size={14} color="#0F6E56" /></div>
+              <div className="flex items-center gap-1.5"><h1 className="truncate font-[Sora,sans-serif] text-lg font-bold text-[#1B2230]">{counterpart}</h1></div>
               <div className="mt-1 flex items-center gap-1.5 text-xs text-[#8991A3]">
                 {counterpartTyping ? (
                   <span className="font-semibold text-[#0F6E56]">typing...</span>
@@ -599,7 +598,7 @@ function ChatPageContent({ id }: { id: string }) {
                   return (
                     <div key={key} id={!isPending(item) ? `chat-message-${item.id}` : undefined} className={`group flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
                       {!mine && (
-                        <span className="grid size-7 shrink-0 place-items-center self-end rounded-full bg-[#171E3A] text-[9px] font-bold text-[#F5A623]">{initials(counterpart)}</span>
+                        <Avatar userId={counterpartId} name={counterpart} className="size-7 self-end text-[9px]" />
                       )}
                       {mine && !isPending(item) && (
                         <button

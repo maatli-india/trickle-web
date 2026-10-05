@@ -100,6 +100,8 @@ export type TravelPlanPricingPreview = {
 export const previewTripPricing = (pricePerPackage: number) =>
   apiRequest<TravelPlanPricingPreview>(`/v1/travel-plans/price-preview${buildQuery({ pricePerPackage })}`);
 
+export type TravelPlanSearchPage = { items?: TravelPlan[]; total?: number; page?: number; limit?: number };
+
 export const searchTravelPlansStartingOnDate = (params: {
   lat: number;
   lng: number;
@@ -109,4 +111,25 @@ export const searchTravelPlansStartingOnDate = (params: {
   status?: string;
   page?: number;
   limit?: number;
-}) => apiRequest(`/v1/travel-plans/search-by-start-date${buildQuery(params)}`);
+}) => apiRequest<TravelPlanSearchPage>(`/v1/travel-plans/search-by-start-date${buildQuery(params)}`);
+
+// "Travelling later on same route" bonus search — both route legs are
+// required and always geo-filtered server-side (unlike
+// searchTravelPlansStartingOnDate, which only filters by whichever single
+// point you pass it). Returns every match from targetDate+1 through
+// targetDate+5 (server-enforced) — deliberately NOT the exact-date search;
+// call searchTravelPlansStartingOnDate separately for that, so the core
+// search never depends on this bonus endpoint being deployed. Treat a
+// failure here as non-fatal: just show nothing extra.
+export const searchTravelPlansFlexible = (params: {
+  lat: number;
+  lng: number;
+  destinationLat: number;
+  destinationLng: number;
+  radiusKm?: number;
+  targetDate: string;
+  travelMode?: string;
+  status?: string;
+  page?: number;
+  limit?: number;
+}) => apiRequest<TravelPlanSearchPage>(`/v1/travel-plans/search-flexible${buildQuery(params)}`);

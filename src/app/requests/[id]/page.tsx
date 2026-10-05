@@ -6,7 +6,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Copy, IndianRupee, MessageCircle, Phone, Share2, Trash2 } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
+import { Avatar } from "@/components/ui/avatar";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { DeclineEvidenceGallery } from "@/components/ui/decline-evidence-gallery";
 import { ParcelPhotoGallery } from "@/components/ui/parcel-photo-gallery";
 import {
   cancelParcelMatch,
@@ -25,7 +27,9 @@ import { redirectToPayUHostedCheckout } from "@/lib/payu";
 import { getTravelPlanById } from "@/services/travel-plans";
 import { extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { CANCELLABLE_STATUSES, effectiveStatus, getRequestStatusLabel, relevantMatchDate } from "@/lib/parcel-status";
-import { avatarTint, initials } from "@/lib/home-constants";
+import { declineReasonLabel } from "@/lib/decline-reasons";
+import { cancelReasonLabel } from "@/lib/cancel-reasons";
+import { formatCategory } from "@/lib/format-category";
 
 const FEE_PCT = 0.25;
 
@@ -181,13 +185,43 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
   const isPendingLike = ["pending", "negotiating", "countered", "searching"].includes(status);
   const isPayGate = ["accepted", "accepted_awaiting_payment", "awaiting_payment", "payment_initiated"].includes(status);
   const isConfirmed = status === "confirmed";
-  const showContactActions = ["confirmed", "picked_up", "in_transit", "delivered"].includes(status);
+  // Matches mobile's CHAT_OPEN_STATUSES — chat/call stay available through
+  // an active post-pickup support case (interrupted_in_transit,
+  // awaiting_recipient), just not once it's handed to admin (return_pending).
+  const showContactActions = ["confirmed", "picked_up", "in_transit", "delivered", "awaiting_recipient", "interrupted_in_transit"].includes(status);
   const isInTransit = ["picked_up", "in_transit"].includes(status);
   const isCompleted = ["delivered", "completed"].includes(status);
   const isCancelledOrDeclined = ["cancelled", "cancelled_by_sender", "cancelled_by_traveler", "rejected", "declined", "expired"].includes(status);
-  const canDeleteFromHistory = isCompleted || isCancelledOrDeclined;
-  const cancellationActor = match.cancellation?.cancelledBy || (status === "cancelled_by_traveler" ? "traveler" : "sender");
+  const isNotPickedUp = status === "not_picked_up";
+  const isInterrupted = status === "interrupted_in_transit";
+  const isAwaitingRecipient = status === "awaiting_recipient";
+  const isReturnPending = status === "return_pending";
+  const canDeleteFromHistory = isCompleted || isCancelledOrDeclined || isNotPickedUp;
+  // A traveler declining at pickup inspection (AcknowledgeInspection,
+  // Accepted:false) lands on the same cancelled_by_traveler status as a
+  // normal self-serve cancel, but never populates `cancellation` — only
+  // declineReasonCode/declineEvidenceImageIds/disputeReason. Branch on
+  // declineReasonCode being present to tell the two apart.
+  const isInspectionDecline = isCancelledOrDeclined && Boolean(match.declineReasonCode);
+  const cancellationActor =
+    match.cancellation?.cancelledBy || (isInspectionDecline || status === "cancelled_by_traveler" ? "traveler" : "sender");
   const cancellationWasByViewer = (isSender && cancellationActor === "sender") || (!isSender && cancellationActor === "traveler");
+  // The backend always sets cancellation.cancelledByName (cancelMatch in
+  // parcel_match.go falls back to a fresh user lookup when it can't derive
+  // one) — counterpart is only a defensive fallback for the one path that
+  // never populates `cancellation` at all (inspection decline).
+  const cancellationActorName =
+    match.cancellation?.cancelledByName || counterpart || (cancellationActor === "traveler" ? "The traveller" : "The sender");
+  const cancellationReasonText = isInspectionDecline
+    ? declineReasonLabel(match.declineReasonCode)
+    : match.cancellation?.reason || cancelReasonLabel(match.cancellation?.reasonCode, cancellationActor);
+  // "late" (within the cancellation-fee/reliability-hit window) or an
+  // inspection decline (always disputed) — a free/early cancel is a
+  // legitimate, consequence-free action, so the platform-takes-this-
+  // seriously reassurance below only makes sense for the cases that
+  // actually carry a fee or reliability impact (cancellationOutcome in
+  // transitorder's parcel_match.go).
+  const isConsequentialCancellation = isInspectionDecline || match.cancellation?.policy === "late";
 
   const respond = async (action: "accept" | "reject") => {
     setBusy(true);
@@ -341,12 +375,11 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#e7b65c]">{isSender ? "Your parcel request" : "Request received"}</p>
           <div className="mt-3 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-            <span
-              className="grid size-12 shrink-0 place-items-center rounded-full text-base font-bold"
-              style={{ backgroundColor: avatarTint(counterpart).bg, color: avatarTint(counterpart).fg }}
-            >
-              {initials(counterpart)}
-            </span>
+            <Avatar
+              userId={isSender ? match.travelerUserId : match.senderUserId}
+              name={counterpart}
+              className="size-12 text-base"
+            />
             <h1 className="text-3xl font-semibold">{counterpart}</h1>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -384,14 +417,19 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
               )}
             </div>
           </div>
-          <p className="mt-3 text-sm text-[#c5d4ce]">{match.parcelDescription || match.parcelCategory || "Parcel request"}</p>
+          <p className="mt-3 text-sm text-[#c5d4ce]">{match.parcelDescription || formatCategory(match.parcelCategory) || "Parcel request"}</p>
           <div className="mt-4 grid gap-2 text-sm text-[#c5d4ce] sm:grid-cols-2">
             <p>
               {match.from?.address || "Pickup"} <span className="text-[#e7b65c]">→</span> {match.to?.address || "Destination"}
             </p>
             <p>By {formatDateTime(relevantDate)}</p>
           </div>
-          {(() => {
+          {/* Earning/offer figures make no sense once a request is cancelled,
+              declined, a no-show, or interrupted post-pickup — the traveler
+              either never gets paid normally or the delivery never
+              completed, and showing "your rate"/"your offer total" there is
+              actively misleading. This block was previously unconditional. */}
+          {!isCancelledOrDeclined && !isNotPickedUp && !isInterrupted && !isAwaitingRecipient && !isReturnPending && (() => {
             // Traveler: rate is the trip's own listed per-package price —
             // total = rate × count (a reference, not what was agreed).
             // Sender: price (match.senderOfferedAmount) is already the
@@ -639,14 +677,23 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
                   ? "Request declined"
                   : cancellationWasByViewer
                     ? "You cancelled this request"
-                    : `${cancellationActor === "traveler" ? "The traveller" : "The sender"} cancelled this request`}
+                    : `${cancellationActorName} cancelled this request`}
             </p>
             {status !== "expired" && !status.includes("declined") && status !== "rejected" && (
               <p className="mt-2 text-sm text-[#62645f]">
                 {cancellationWasByViewer ? "The other participant has been notified." : "This delivery is now closed."}
               </p>
             )}
-            {match.cancellation?.reason && <p className="mt-2 text-sm text-[#62645f]">{match.cancellation.reason}</p>}
+            {cancellationReasonText && <p className="mt-2 text-sm text-[#62645f]">{cancellationReasonText}</p>}
+            {isInspectionDecline && (
+              <DeclineEvidenceGallery matchId={id} imageIds={match.declineEvidenceImageIds || []} />
+            )}
+            {!cancellationWasByViewer && isConsequentialCancellation && (
+              <p className="mt-3 border-t border-[#e4ded2] pt-3 text-xs leading-5 text-[#62645f]">
+                We take cancellations like this seriously — it&apos;s been recorded against {cancellationActorName}&apos;s
+                reliability score, and repeated instances can affect their standing on Trickle.
+              </p>
+            )}
             {isSender && match.cancellation?.refundStatus && (
               <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#b7e4d4] bg-[#e1f5ee] px-4 py-3.5">
                 <IndianRupee size={16} className="mt-0.5 shrink-0 text-[#085041]" />
@@ -671,6 +718,47 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
             )}
           </section>
         )}
+
+        {isNotPickedUp && (
+          <section className="mt-6 border border-[#ded8ce] bg-[#fbfaf7] p-6">
+            <p className="text-sm font-semibold text-[#183b3a]">No-show reported</p>
+            <p className="mt-2 text-sm text-[#62645f]">
+              A report was filed that pickup didn&apos;t happen as planned. Our support team is reviewing it and will
+              follow up directly once there&apos;s an update.
+            </p>
+          </section>
+        )}
+
+        {(isInterrupted || isAwaitingRecipient || isReturnPending) && (
+          <section className="mt-6 border border-[#ded8ce] bg-[#fbfaf7] p-6">
+            <p className="text-sm font-semibold text-[#183b3a]">
+              {isInterrupted
+                ? "This delivery was interrupted"
+                : isAwaitingRecipient
+                  ? "Waiting for the recipient"
+                  : "This parcel is being returned"}
+            </p>
+            <p className="mt-2 text-sm text-[#62645f]">
+              {isSender
+                ? isInterrupted
+                  ? "The traveller reported they couldn't complete this delivery. Our support team is reviewing it and will process any applicable refund — we'll keep you updated."
+                  : isAwaitingRecipient
+                    ? "The traveller has arrived but couldn't reach the recipient yet. They'll try again shortly."
+                    : "This parcel couldn't be delivered and is being returned to you. Our support team is coordinating the return and any applicable refund."
+                : isInterrupted
+                  ? "This counts against your reliability score unless support verifies a genuine emergency. Make sure the parcel gets returned safely."
+                  : isAwaitingRecipient
+                    ? "Try reaching the recipient again, or report back if they remain unavailable."
+                    : "Coordinate with support to return this parcel to the sender."}
+            </p>
+            {isInterrupted && !isSender && match.exceptionReason && (
+              <div className="mt-4 border-t border-[#e4ded2] pt-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8a8579]">Your reported reason</p>
+                <p className="mt-1 text-sm text-[#62645f]">{match.exceptionReason}</p>
+              </div>
+            )}
+          </section>
+        )}
       </main>
 
       <ConfirmModal
@@ -692,6 +780,13 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
         onCancel={() => setCancelOpen(false)}
         onConfirm={cancel}
       >
+        {!isEarlyCancellation(relevantDate) && (
+          <p className="mt-3 rounded-xl border border-[#fbe2b4] bg-[#fff6e8] px-3 py-2.5 text-xs leading-5 text-[#7a4e05]">
+            {isSender
+              ? "Cancelling this close to pickup isn't something we encourage — it leaves a traveller holding reserved capacity at short notice. Doing this often may affect how your account is reviewed."
+              : `Cancelling this close to pickup isn't something we encourage — it leaves ${counterpart} without a traveller at short notice. Repeated late cancellations can lower your reliability badge and affect how your account is reviewed.`}
+          </p>
+        )}
         <Link href="/cancellation-policy" className="mt-3 inline-block text-xs font-semibold text-[#62645f] underline hover:text-[#1b1d1c]">
           Cancellation & refund policy
         </Link>

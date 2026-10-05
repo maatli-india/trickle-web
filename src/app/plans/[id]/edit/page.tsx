@@ -22,13 +22,10 @@ import {
   PICKUP_API_TYPES,
   PICKUP_KEY_FROM_API,
   apiDate,
+  keysFromApiValues,
 } from "@/lib/trip-form-constants";
 import { inputClass, labelClass } from "@/components/forms/location-fields";
 
-const keysFromApiValues = (values: string[] | undefined, single: string | undefined, map: Record<string, string>): Set<string> => {
-  const source = values?.length ? values : single ? [single] : [];
-  return new Set(source.map((value) => map[value]).filter(Boolean) as string[]);
-};
 const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((value) => b.has(value));
 
 export default function EditTripPage({ params }: { params: Promise<{ id: string }> }) {

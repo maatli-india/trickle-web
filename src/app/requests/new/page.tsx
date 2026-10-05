@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
@@ -9,6 +9,31 @@ import { useLocationPair } from "@/hooks/use-location-pair";
 import { apiRequest } from "@/services/api-client";
 import { getWebUserId } from "@/services/auth";
 import { dedupeRecentSearches, recentSearchesStorageKey } from "@/lib/recent-searches";
+import { searchTravelPlansFlexible, searchTravelPlansStartingOnDate } from "@/services/travel-plans";
+
+// Display-only mirror of transitorder's constants.TravelSearchMaxFlexDays —
+// the backend is what actually enforces the cutoff.
+const MAX_FLEX_DAYS = 5;
+
+// searchTravelPlansStartingOnDate only ever geo-filters one leg of the
+// route server-side — this checks the destination side client-side for
+// that call specifically, so exact-date results still respect both pickup
+// and delivery location.
+const distanceKm = (
+  first?: { lat?: number | string; lng?: number | string },
+  second?: { lat?: number | string; lng?: number | string },
+) => {
+  const firstLat = Number(first?.lat);
+  const firstLng = Number(first?.lng);
+  const secondLat = Number(second?.lat);
+  const secondLng = Number(second?.lng);
+  if (!Number.isFinite(firstLat) || !Number.isFinite(firstLng) || !Number.isFinite(secondLat) || !Number.isFinite(secondLng)) return Infinity;
+  const radians = (value: number) => (value * Math.PI) / 180;
+  const latDelta = radians(secondLat - firstLat);
+  const lngDelta = radians(secondLng - firstLng);
+  const a = Math.sin(latDelta / 2) ** 2 + Math.cos(radians(firstLat)) * Math.cos(radians(secondLat)) * Math.sin(lngDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 type Traveller = {
   id?: string;
@@ -32,8 +57,8 @@ type Traveller = {
     completedTrips?: number;
     totalCount?: number;
   };
-  from?: { address?: string };
-  to?: { address?: string };
+  from?: { address?: string; lat?: number; lng?: number };
+  to?: { address?: string; lat?: number; lng?: number };
   departureDate?: string;
   arrivalDate?: string;
   travelMode?: string;
@@ -73,6 +98,12 @@ export default function NewParcelRequestPage() {
   const { from, setFrom, to, setTo } = useLocationPair();
   const [pickupDate, setPickupDate] = useState("");
   const [travellers, setTravellers] = useState<Traveller[]>([]);
+  // laterTravellers is only populated alongside exact-date travellers (the
+  // "travelling later on same route" section) — when there were no
+  // exact-date matches, the flexible search's laterMatches get promoted
+  // into `travellers` instead and this stays empty.
+  const [laterTravellers, setLaterTravellers] = useState<Traveller[]>([]);
+  const [usedFallbackDate, setUsedFallbackDate] = useState(false);
   const [travellerSearchMessage, setTravellerSearchMessage] = useState("");
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -82,20 +113,44 @@ export default function NewParcelRequestPage() {
   const [sortKey, setSortKey] = useState("match");
   const [searchSubmitted, setSearchSubmitted] = useState(false);
 
-  const filteredTravellers = useMemo(() => {
-    const list = modeFilter === "all" ? travellers : travellers.filter((traveller) => modeKey(traveller.travelMode) === modeFilter);
-    return [...list].sort((first, second) => {
-      if (sortKey === "price") return Number(first.senderDisplayPricePerPackage ?? first.pricePerPackage ?? first.price ?? 0) - Number(second.senderDisplayPricePerPackage ?? second.pricePerPackage ?? second.price ?? 0);
-      if (sortKey === "rating") return Number(second.user?.rating ?? second.rating ?? 0) - Number(first.user?.rating ?? first.rating ?? 0);
-      if (sortKey === "earliest") return String(first.departureDate || "").localeCompare(String(second.departureDate || ""));
-      return 0;
-    });
-  }, [modeFilter, sortKey, travellers]);
+  const filterAndSortTravellers = useCallback(
+    (list: Traveller[]) => {
+      const modeFiltered = modeFilter === "all" ? list : list.filter((traveller) => modeKey(traveller.travelMode) === modeFilter);
+      return [...modeFiltered].sort((first, second) => {
+        if (sortKey === "price") return Number(first.senderDisplayPricePerPackage ?? first.pricePerPackage ?? first.price ?? 0) - Number(second.senderDisplayPricePerPackage ?? second.pricePerPackage ?? second.price ?? 0);
+        if (sortKey === "rating") return Number(second.user?.rating ?? second.rating ?? 0) - Number(first.user?.rating ?? first.rating ?? 0);
+        if (sortKey === "earliest") return String(first.departureDate || "").localeCompare(String(second.departureDate || ""));
+        return 0;
+      });
+    },
+    [modeFilter, sortKey],
+  );
+  const filteredTravellers = useMemo(() => filterAndSortTravellers(travellers), [filterAndSortTravellers, travellers]);
+  const filteredLaterTravellers = useMemo(() => filterAndSortTravellers(laterTravellers), [filterAndSortTravellers, laterTravellers]);
+
+  // Fetches each traveller's profile when the search result didn't already
+  // carry a name — same enrichment logic for both the exact and later sets.
+  const enrichTravellers = (matches: Traveller[]) =>
+    Promise.all(
+      matches.map(async (traveller) => {
+        const travellerId = traveller.travelerId || traveller.userId || traveller.user?.id || traveller.id;
+        if (!travellerId || traveller.name || traveller.user?.name) return traveller;
+        try {
+          const profile = await apiRequest<{ profileDetails?: Traveller; user?: Traveller; data?: Traveller } | Traveller>(`/v1/users/${travellerId}`);
+          const profileUser = "profileDetails" in profile ? profile.profileDetails : "user" in profile ? profile.user : "data" in profile ? profile.data : profile;
+          return { ...traveller, user: { ...traveller.user, ...profileUser } };
+        } catch {
+          return traveller;
+        }
+      }),
+    );
 
   const findTravellers = async (event?: FormEvent) => {
     event?.preventDefault();
     setTravellerSearchMessage("");
     setTravellers([]);
+    setLaterTravellers([]);
+    setUsedFallbackDate(false);
     if (!pickupDate) {
       setError("Select a pickup date before finding travellers.");
       return;
@@ -107,31 +162,53 @@ export default function NewParcelRequestPage() {
     setSubmitting(true);
     setError("");
     try {
-      const query = new URLSearchParams({ lat: from.lat, lng: from.lng, radiusKm: "50", targetDate: pickupDate, status: "active" });
-      let response: { items?: typeof travellers; data?: typeof travellers };
-      try {
-        response = await apiRequest(`/v1/travel-plans/search-by-start-date?${query.toString()}`);
-      } catch {
-        response = await apiRequest(`/v1/travel-plans/search?${query.toString()}`);
-      }
-      const matches = response.items || response.data || [];
-      const enrichedMatches = await Promise.all(
-        matches.map(async (traveller) => {
-          const travellerId = traveller.travelerId || traveller.userId || traveller.user?.id || traveller.id;
-          if (!travellerId || traveller.name || traveller.user?.name) return traveller;
-          try {
-            const profile = await apiRequest<{ profileDetails?: Traveller; user?: Traveller; data?: Traveller } | Traveller>(`/v1/users/${travellerId}`);
-            const profileUser = "profileDetails" in profile ? profile.profileDetails : "user" in profile ? profile.user : "data" in profile ? profile.data : profile;
-            return { ...traveller, user: { ...traveller.user, ...profileUser } };
-          } catch {
-            return traveller;
-          }
-        }),
+      // Exact-date matches: the already-deployed, stable search. This is
+      // the core experience — it must keep working regardless of whether
+      // the bonus "later matches" search below is deployed.
+      const exactSearch = searchTravelPlansStartingOnDate({
+        lat: Number(from.lat),
+        lng: Number(from.lng),
+        radiusKm: 50,
+        targetDate: pickupDate,
+        status: "active",
+      }).then((response) => ((response.items || []) as Traveller[]).filter((traveller) => distanceKm(traveller.to, to) <= 50));
+
+      // "Travelling later on same route" bonus set — best-effort. Any
+      // failure here (not deployed yet, network blip) is swallowed so it
+      // never blocks or errors the exact-date search above.
+      const laterSearch = searchTravelPlansFlexible({
+        lat: Number(from.lat),
+        lng: Number(from.lng),
+        destinationLat: Number(to.lat),
+        destinationLng: Number(to.lng),
+        radiusKm: 50,
+        targetDate: pickupDate,
+        status: "active",
+      })
+        .then((response) => (response.items || []) as Traveller[])
+        .catch((requestError) => {
+          console.warn("[requests/new] later-date search failed (non-fatal)", requestError);
+          return [] as Traveller[];
+        });
+
+      const [exactMatches, laterMatches] = await Promise.all([exactSearch, laterSearch]);
+      const fallback = exactMatches.length === 0 && laterMatches.length > 0;
+      const mainMatches = fallback ? laterMatches : exactMatches;
+      const secondaryMatches = fallback ? [] : laterMatches;
+      const [enrichedMain, enrichedSecondary] = await Promise.all([enrichTravellers(mainMatches), enrichTravellers(secondaryMatches)]);
+
+      setTravellers(enrichedMain);
+      setLaterTravellers(enrichedSecondary);
+      setUsedFallbackDate(fallback);
+      setTravellerSearchMessage(
+        fallback
+          ? `No exact match on ${formatSearchDate(pickupDate)} — showing ${enrichedMain.length} traveller${enrichedMain.length === 1 ? "" : "s"} over the next ${MAX_FLEX_DAYS} days on this route instead.`
+          : enrichedMain.length
+            ? `${enrichedMain.length} traveller${enrichedMain.length === 1 ? "" : "s"} found for your route.`
+            : "No active travellers were found for that pickup date.",
       );
-      setTravellers(enrichedMatches);
-      setTravellerSearchMessage(matches.length ? `${matches.length} traveller${matches.length === 1 ? "" : "s"} found for your route.` : "No active travellers were found for that pickup date.");
       setSearchSubmitted(true);
-      const search: RecentSearch = { from, to, pickupDate, travellers: enrichedMatches };
+      const search: RecentSearch = { from, to, pickupDate, travellers: enrichedMain };
       void apiRequest("/v1/recent-searches", {
         method: "POST",
         body: JSON.stringify({
@@ -222,10 +299,78 @@ export default function NewParcelRequestPage() {
     setTo(search.to);
     setPickupDate(search.pickupDate);
     setTravellers(search.travellers || []);
+    setLaterTravellers([]);
+    setUsedFallbackDate(false);
     setSearchSubmitted(Boolean(search.travellers));
     setTravellerSearchMessage(search.travellers?.length ? `${search.travellers.length} traveller${search.travellers.length === 1 ? "" : "s"} found for your route.` : "");
     setError("");
     window.sessionStorage.setItem(activeParcelSearchKey, JSON.stringify(search));
+  };
+
+  // isLater: true for a card in the "travelling later on same route"
+  // section, or for the main list when it's been promoted from
+  // laterMatches (no exact-date match) — in both cases the card's date is
+  // not the sender's requested pickup date, so it's worth calling out.
+  const renderTravellerCard = (traveller: Traveller, { isLater }: { isLater: boolean }) => {
+    const name = traveller.user?.name || traveller.name || "Traveller";
+    const profilePic = traveller.user?.profilePicUrl || traveller.profilePicUrl || traveller.profilePicture;
+    const rating = traveller.user?.rating ?? traveller.user?.ratings ?? traveller.rating ?? traveller.ratings;
+    const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips;
+    const price = traveller.senderDisplayPricePerPackage ?? traveller.pricePerPackage ?? traveller.price;
+    return (
+      <article
+        key={traveller.id || traveller.travelerId}
+        className={`bg-[#fbfaf7] p-5 ${isLater ? "border-l-2 border-[#c7d8d6]" : "border-l-2 border-[#e7b65c]"}`}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-4">
+            <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e7b65c] text-xl font-semibold text-[#183b3a]">
+              {profilePic ? <img src={profilePic} alt={`${name} profile`} className="size-full object-cover" /> : name.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h4 className="truncate text-lg font-semibold text-[#183b3a]">{name}</h4>
+              <p className="mt-1 text-sm text-[#62645f]">
+                ★ {rating ?? "Not rated"} <span className="px-1">·</span> {completedTrips ?? 0} completed trips
+              </p>
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-lg font-semibold text-[#285c59]">{price ? `₹${price}` : "Open"}</p>
+            {price ? <p className="text-xs text-[#62645f]">per package</p> : null}
+          </div>
+        </div>
+        <div className="mt-4 border-t border-[#ded8ce] pt-4">
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#e85b43]">From</p>
+              <p className="mt-1 break-words text-sm font-semibold leading-5 text-[#183b3a]">{traveller.from?.address || from.address}</p>
+            </div>
+            <span className="hidden text-[#e85b43] sm:block">→</span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#e85b43]">To</p>
+              <p className="mt-1 break-words text-sm font-semibold leading-5 text-[#183b3a]">{traveller.to?.address || to.address}</p>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#62645f]">
+            <span className={isLater ? "font-semibold text-[#b37113]" : ""}>
+              {traveller.departureDate ? new Date(traveller.departureDate).toLocaleString() : "Date not provided"}
+              {isLater ? " (different date)" : ""}
+            </span>
+            <span className="text-[#d7d2c9]">·</span>
+            <span>Up to {traveller.maxWeightKg ? `${traveller.maxWeightKg} kg` : "space"}</span>
+            <span className="ml-auto inline-flex items-center border border-[#e7b65c] bg-[#fff4d8] px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#7a5310]">{formatTravelMode(traveller.travelMode)}</span>
+          </div>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button type="button" onClick={() => openTravellerDetails(traveller)} className="flex-1 rounded-lg border border-[#d7d2c9] bg-white py-2 text-sm font-semibold text-[#62645f] hover:border-[#e85b43]">
+            View profile
+          </button>
+          <button type="button" onClick={() => requestTraveller(traveller)} className="flex-1 rounded-lg bg-[#e85b43] py-2 text-sm font-semibold text-white hover:bg-[#cf4935]">
+            Request →
+          </button>
+        </div>
+      </article>
+    );
   };
 
   return (
@@ -296,65 +441,19 @@ export default function NewParcelRequestPage() {
                 ))}
               </div>
               {filteredTravellers.length === 0 && <p className="text-sm text-[#62645f]">No travellers match this filter. Try a different mode.</p>}
-              {filteredTravellers.map((traveller, index) => {
-                const name = traveller.user?.name || traveller.name || "Traveller";
-                const profilePic = traveller.user?.profilePicUrl || traveller.profilePicUrl || traveller.profilePicture;
-                const rating = traveller.user?.rating ?? traveller.user?.ratings ?? traveller.rating ?? traveller.ratings;
-                const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips;
-                const price = traveller.senderDisplayPricePerPackage ?? traveller.pricePerPackage ?? traveller.price;
-                return (
-                  <article
-                    key={traveller.id || traveller.travelerId || index}
-                    className="border-l-2 border-[#e7b65c] bg-[#fbfaf7] p-5"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex min-w-0 items-start gap-4">
-                        <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e7b65c] text-xl font-semibold text-[#183b3a]">
-                          {profilePic ? <img src={profilePic} alt={`${name} profile`} className="size-full object-cover" /> : name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h4 className="truncate text-lg font-semibold text-[#183b3a]">{name}</h4>
-                          <p className="mt-1 text-sm text-[#62645f]">
-                            ★ {rating ?? "Not rated"} <span className="px-1">·</span> {completedTrips ?? 0} completed trips
-                          </p>
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-lg font-semibold text-[#285c59]">{price ? `₹${price}` : "Open"}</p>
-                        {price ? <p className="text-xs text-[#62645f]">per package</p> : null}
-                      </div>
-                    </div>
-                    <div className="mt-4 border-t border-[#ded8ce] pt-4">
-                      <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#e85b43]">From</p>
-                          <p className="mt-1 break-words text-sm font-semibold leading-5 text-[#183b3a]">{traveller.from?.address || from.address}</p>
-                        </div>
-                        <span className="hidden text-[#e85b43] sm:block">→</span>
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#e85b43]">To</p>
-                          <p className="mt-1 break-words text-sm font-semibold leading-5 text-[#183b3a]">{traveller.to?.address || to.address}</p>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#62645f]">
-                        <span>{traveller.departureDate ? new Date(traveller.departureDate).toLocaleString() : "Date not provided"}</span>
-                        <span className="text-[#d7d2c9]">·</span>
-                        <span>Up to {traveller.maxWeightKg ? `${traveller.maxWeightKg} kg` : "space"}</span>
-                        <span className="ml-auto inline-flex items-center border border-[#e7b65c] bg-[#fff4d8] px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#7a5310]">{formatTravelMode(traveller.travelMode)}</span>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex gap-2">
-                      <button type="button" onClick={() => openTravellerDetails(traveller)} className="flex-1 rounded-lg border border-[#d7d2c9] bg-white py-2 text-sm font-semibold text-[#62645f] hover:border-[#e85b43]">
-                        View profile
-                      </button>
-                      <button type="button" onClick={() => requestTraveller(traveller)} className="flex-1 rounded-lg bg-[#e85b43] py-2 text-sm font-semibold text-white hover:bg-[#cf4935]">
-                        Request →
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
+              {filteredTravellers.map((traveller) => renderTravellerCard(traveller, { isLater: usedFallbackDate }))}
             </div>
+            </div>
+          )}
+          {filteredLaterTravellers.length > 0 && (
+            <div className="mt-6 rounded-2xl border border-[#d7d2c9] bg-white p-5 sm:p-7">
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-xl font-semibold text-[#183b3a]">Travelling later on same route</h3>
+                  <p className="mt-1 text-sm text-[#62645f]">Within the next {MAX_FLEX_DAYS} days — a flexible option if you can ship a little sooner or later.</p>
+                </div>
+                {filteredLaterTravellers.map((traveller) => renderTravellerCard(traveller, { isLater: true }))}
+              </div>
             </div>
           )}
         </form>
