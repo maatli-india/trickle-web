@@ -3,13 +3,14 @@
 import { Suspense, use, useEffect, useRef, useState, type ClipboardEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, Copy, IndianRupee, MessageCircle, Phone, Share2, Trash2 } from "lucide-react";
+import { Check, Copy, IndianRupee, MessageCircle, Phone, Share2, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { Avatar } from "@/components/ui/avatar";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { DeclineEvidenceGallery } from "@/components/ui/decline-evidence-gallery";
 import { ParcelPhotoGallery } from "@/components/ui/parcel-photo-gallery";
+import { VerifyPromptModal } from "@/components/verify-prompt-modal";
 import {
   cancelParcelMatch,
   confirmHandoff,
@@ -18,6 +19,7 @@ import {
   getParcelMatch,
   initiateHandoff,
   mockConfirmPayment,
+  requestSenderVerification,
   respondToCounterOffer,
   signCheckoutHash,
   submitMatchRating,
@@ -25,6 +27,8 @@ import {
 } from "@/services/parcel-matches";
 import { redirectToPayUHostedCheckout } from "@/lib/payu";
 import { getTravelPlanById } from "@/services/travel-plans";
+import { getUserProfile, type UserProfile } from "@/services/users";
+import { getWebProfile } from "@/services/auth";
 import { extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { CANCELLABLE_STATUSES, effectiveStatus, getRequestStatusLabel, relevantMatchDate } from "@/lib/parcel-status";
 import { declineReasonLabel } from "@/lib/decline-reasons";
@@ -80,7 +84,12 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
   const [ratingComment, setRatingComment] = useState("");
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [travelPlan, setTravelPlan] = useState<TravelPlan | null>(null);
+  const [senderProfile, setSenderProfile] = useState<UserProfile | null>(null);
+  const [verifyRequestBusy, setVerifyRequestBusy] = useState(false);
+  const [verifyRequested, setVerifyRequested] = useState(false);
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const handoffInputRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const verifyModalAutoOpenedRef = useRef(false);
 
   const refresh = () =>
     getParcelMatch(id)
@@ -130,6 +139,43 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.travelPlanId]);
+
+  // Sender-verified signal for the traveler reviewing a pending request —
+  // only fetched for the traveler's own view of a still-pending match, so
+  // the "ask to verify" prompt below has something to gate on.
+  useEffect(() => {
+    if (isSender || !match?.senderUserId) return;
+    const matchStatus = effectiveStatus(match.status, relevantMatchDate(match));
+    if (!["pending", "negotiating", "countered", "searching"].includes(matchStatus)) return;
+    getUserProfile(match.senderUserId)
+      .then((profile) => setSenderProfile(profile))
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSender, match?.senderUserId, match?.status]);
+
+  // Auto-opens the verify-identity modal for the sender, once per page
+  // load, when the traveler has asked them to verify and they aren't
+  // already verified. Uses the locally cached profile (not a fresh fetch)
+  // purely to decide whether to open — VerifyPromptModal fetches its own
+  // fresh copy to decide what it actually shows.
+  useEffect(() => {
+    if (verifyModalAutoOpenedRef.current) return;
+    if (!isSender || !match?.verificationRequestedAt) return;
+    // Deferred the same way requests/new defers its own post-mount setState
+    // calls — keeps this out of the synchronous effect body.
+    queueMicrotask(() => {
+      if (verifyModalAutoOpenedRef.current) return;
+      let selfVerified = false;
+      try {
+        selfVerified = Boolean(JSON.parse(getWebProfile() || "{}").verified);
+      } catch {
+        selfVerified = false;
+      }
+      if (selfVerified) return;
+      verifyModalAutoOpenedRef.current = true;
+      setVerifyModalOpen(true);
+    });
+  }, [isSender, match?.verificationRequestedAt]);
 
   if (loading) {
     return (
@@ -223,6 +269,20 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
   // transitorder's parcel_match.go).
   const isConsequentialCancellation = isInspectionDecline || match.cancellation?.policy === "late";
 
+  // Report entry points (sender-only) — see account/report-problem, which
+  // reads these same query params to pre-fill its form.
+  const declineReportHref = `/account/report-problem?${new URLSearchParams({
+    reportedType: "request",
+    reportedId: id,
+    category: "demanded_money_outside_app",
+  }).toString()}`;
+  const cancellationReportHref = `/account/report-problem?${new URLSearchParams({
+    reportedType: "request",
+    reportedId: id,
+    category: "traveler_cancelled_after_confirm",
+    description: `${match.from?.address || "Pickup"} → ${match.to?.address || "Destination"} · ${formatDateTime(relevantDate)}${cancellationReasonText ? ` — ${cancellationReasonText}` : ""}`,
+  }).toString()}`;
+
   const respond = async (action: "accept" | "reject") => {
     setBusy(true);
     setError("");
@@ -233,6 +293,19 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
       setError(requestError instanceof Error ? requestError.message : "Could not update this request.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const askSenderToVerify = async () => {
+    setVerifyRequestBusy(true);
+    setError("");
+    try {
+      await requestSenderVerification(id);
+      setVerifyRequested(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not send the verification request.");
+    } finally {
+      setVerifyRequestBusy(false);
     }
   };
 
@@ -483,6 +556,28 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
                     {busy ? "Accepting..." : "Accept"}
                   </button>
                 </div>
+                {senderProfile && !senderProfile.verified && (
+                  <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#fbe2b4] bg-[#fff6e8] px-4 py-3.5">
+                    <ShieldAlert size={16} className="mt-0.5 shrink-0 text-[#7a4e05]" />
+                    <div>
+                      <p className="text-sm leading-5 text-[#7a4e05]">
+                        {counterpart} isn&apos;t verified yet. Ask them to verify before you accept?
+                      </p>
+                      {verifyRequested ? (
+                        <p className="mt-2 text-xs font-semibold text-[#7a4e05]">Verification requested</p>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={verifyRequestBusy}
+                          onClick={askSenderToVerify}
+                          className="mt-2.5 rounded-xl border border-[#7a4e05]/30 bg-white px-4 py-2 text-xs font-semibold text-[#7a4e05] disabled:opacity-60"
+                        >
+                          {verifyRequestBusy ? "Sending..." : "Ask to verify"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </section>
@@ -493,6 +588,10 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
             {isSender ? (
               <>
                 <p className="text-sm font-semibold text-[#183b3a]">Confirm and pay ₹{payableAmount}</p>
+                <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-[#62645f]">
+                  <ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#1f6e52]" />
+                  Your payment stays with Trickle until delivery is confirmed — if anything goes wrong, you&apos;ll be refunded. Reach out to us anytime.
+                </p>
                 {!paymentOrder ? (
                   <button type="button" disabled={busy} onClick={startPayment} className="mt-4 rounded-xl bg-[#e85b43] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                     {busy ? "Redirecting to PayU..." : "Pay now"}
@@ -684,7 +783,9 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
                 {cancellationWasByViewer ? "The other participant has been notified." : "This delivery is now closed."}
               </p>
             )}
-            {cancellationReasonText && <p className="mt-2 text-sm text-[#62645f]">{cancellationReasonText}</p>}
+            {cancellationReasonText && !(!isSender && cancellationActor === "sender") && (
+              <p className="mt-2 text-sm text-[#62645f]">{cancellationReasonText}</p>
+            )}
             {isInspectionDecline && (
               <DeclineEvidenceGallery matchId={id} imageIds={match.declineEvidenceImageIds || []} />
             )}
@@ -712,8 +813,18 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
               </div>
             )}
             {isSender && (status === "rejected" || status === "declined") && (
-              <Link href="/requests/new" className="mt-4 inline-block rounded-xl bg-[#e85b43] px-5 py-3 text-sm font-semibold text-white">
-                Find another traveller
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link href="/requests/new" className="rounded-xl bg-[#e85b43] px-5 py-3 text-sm font-semibold text-white">
+                  Find another traveller
+                </Link>
+                <Link href={declineReportHref} className="rounded-xl border border-[#d7d2c9] px-5 py-3 text-sm font-semibold text-[#62645f]">
+                  Report this
+                </Link>
+              </div>
+            )}
+            {isSender && cancellationActor === "traveler" && status !== "rejected" && status !== "declined" && (
+              <Link href={cancellationReportHref} className="mt-3 inline-block text-xs font-semibold text-[#62645f] underline hover:text-[#1b1d1c]">
+                Report this
               </Link>
             )}
           </section>
@@ -801,6 +912,11 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
         loading={busy}
         onCancel={() => setDeleteOpen(false)}
         onConfirm={deleteFromHistory}
+      />
+      <VerifyPromptModal
+        open={verifyModalOpen}
+        reason={`${counterpart} is asking you to verify your identity for this request.`}
+        onClose={() => setVerifyModalOpen(false)}
       />
       <SiteFooter />
     </div>

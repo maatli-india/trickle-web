@@ -137,6 +137,11 @@ export type ParcelMatch = {
     refundFailureReason?: string;
   };
   createdAt?: string;
+  // Set once the sender has been asked to verify their identity via
+  // DigiLocker for this match (request-verification) — idempotent on the
+  // backend, so this timestamp reflects the first request, not the most
+  // recent one. Present for both the sender and traveler viewer.
+  verificationRequestedAt?: string;
   [key: string]: unknown;
 };
 

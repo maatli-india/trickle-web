@@ -37,6 +37,10 @@ export default function AccountSettingsPage() {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState("");
+  // Gender/DOB are optional at signup but DigiLocker needs both to match
+  // against Aadhaar — see the Personal information fields below, which
+  // become editable (once) exactly when either is still missing.
+  const missingIdentityFields = !profile.gender || !profile.dob;
 
   const pickPhoto = () => photoInputRef.current?.click();
 
@@ -153,11 +157,20 @@ export default function AccountSettingsPage() {
                 <label className="block text-sm font-semibold text-[#183b3a]">Phone<input value={profile.phone} disabled className={inputClass} /></label>
               </div>
               <div className="grid gap-5 sm:grid-cols-2">
-                <label className="block text-sm font-semibold text-[#183b3a]">Gender<select value={profile.gender} disabled className={inputClass}><option value="">Not specified</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></label>
-                <label className="block text-sm font-semibold text-[#183b3a]">Date of birth<input type="date" value={profile.dob} disabled className={inputClass} /></label>
+                <label className="block text-sm font-semibold text-[#183b3a]">
+                  Gender {!profile.gender && <span className="font-normal text-[#8a8579]">(optional, but needed to verify your identity)</span>}
+                  <select value={profile.gender} disabled={Boolean(profile.gender)} onChange={(event) => setProfile({ ...profile, gender: event.target.value })} className={inputClass}>
+                    <option value="">Not specified</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-semibold text-[#183b3a]">
+                  Date of birth {!profile.dob && <span className="font-normal text-[#8a8579]">(optional, but needed to verify your identity)</span>}
+                  <input type="date" value={profile.dob} disabled={Boolean(profile.dob)} onChange={(event) => setProfile({ ...profile, dob: event.target.value })} className={inputClass} />
+                </label>
               </div>
               <p className="rounded-xl border border-[#e4ded2] bg-[#fbfaf7] px-4 py-3 text-xs leading-5 text-[#8a8579]">
-                Name, phone, gender, and date of birth are checked against your DigiLocker identity verification and can&apos;t be changed here. Contact <a href="/support" className="font-semibold text-[#183b3a] underline">support</a> if any of these need to be corrected.
+                Name and phone can&apos;t be changed here. Gender and date of birth are optional, but matched against your DigiLocker identity verification once you provide them — enter them exactly as they appear on your Aadhaar, and save, before they&apos;re locked permanently. Contact{" "}
+                <a href="/support" className="font-semibold text-[#183b3a] underline">support</a> if any of your locked details need to be corrected.
               </p>
             </div>
           </div>
@@ -169,6 +182,10 @@ export default function AccountSettingsPage() {
               <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#bfe3d6] bg-[#eaf7f1] px-4 py-3 text-sm font-semibold text-[#1f6e52]">
                 <ShieldCheck size={16} /> Verified
               </div>
+            ) : missingIdentityFields ? (
+              <p className="mt-4 rounded-xl border border-[#e4ded2] bg-[#fbfaf7] px-4 py-3 text-sm text-[#8a8579]">
+                Fill in your gender and date of birth under Personal information above, then save, before verifying — DigiLocker needs both to confirm it&apos;s really you.
+              </p>
             ) : (
               <>
                 <button
