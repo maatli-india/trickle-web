@@ -6,6 +6,7 @@ import Link from "next/link";
 import { getWebProfile, hasAccessToken, logoutWebSession } from "@/services/auth";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Avatar } from "@/components/ui/avatar";
+import { TrickleLogo } from "@/components/layout/trickle-logo";
 
 const subscribe = () => () => {};
 
@@ -62,8 +63,7 @@ export function SiteHeader() {
     <header className="border-b border-[#ded8ce] bg-[#fbfaf7]/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8">
         <Link href="/" className="flex items-center gap-3" aria-label="Trickle home">
-          <span className="grid size-9 place-items-center rounded-xl bg-[#e85b43] text-lg font-bold text-white">T</span>
-          <span className="text-xl font-semibold tracking-[-0.03em]">trickle</span>
+          <TrickleLogo size={34} />
         </Link>
         {!authenticated && (
           <nav className="flex max-w-2xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-[#62645f] sm:gap-x-5 sm:text-sm" aria-label="Primary navigation">

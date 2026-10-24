@@ -251,14 +251,16 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
         </Link>
         <h1 className="mt-6 text-3xl font-semibold text-[#183b3a]">Edit trip</h1>
 
-        <div className={`mt-6 border p-4 ${allowanceUsed ? "border-[#f3d3cc] bg-[#faece7]" : "border-[#b7e4d4] bg-[#e1f5ee]"}`}>
-          <p className={`text-sm font-semibold ${allowanceUsed ? "text-[#b33e2c]" : "text-[#085041]"}`}>
-            {allowanceUsed ? "Free major change used" : "Free major change available"}
+        <div className={`mt-6 border p-4 ${blocked ? "border-[#f3d3cc] bg-[#faece7]" : "border-[#b7e4d4] bg-[#e1f5ee]"}`}>
+          <p className={`text-sm font-semibold ${blocked ? "text-[#b33e2c]" : "text-[#085041]"}`}>
+            {requests.length === 0 ? "Free edits — no requests yet" : allowanceUsed ? "Free major change used" : "Free major change available"}
           </p>
-          <p className={`mt-1 text-xs leading-5 ${allowanceUsed ? "text-[#b33e2c]" : "text-[#085041]"}`}>
-            {allowanceUsed
-              ? "Any further change to pickup or delivery mode needs a cancellation instead."
-              : "You can change your pickup or delivery mode once for free — affected senders will be notified."}
+          <p className={`mt-1 text-xs leading-5 ${blocked ? "text-[#b33e2c]" : "text-[#085041]"}`}>
+            {requests.length === 0
+              ? "Change route, pickup, delivery mode, or price as much as you like until someone requests this trip."
+              : allowanceUsed
+                ? "Any further change to pickup or delivery mode needs a cancellation instead."
+                : "You can change your pickup or delivery mode once for free — affected senders will be notified."}
           </p>
         </div>
 

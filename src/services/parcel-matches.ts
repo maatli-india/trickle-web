@@ -86,6 +86,15 @@ export const respondToCounterOffer = (matchId: string, action: "accept" | "rejec
 export const flagParcelDispute = (matchId: string, reason: string) =>
   apiRequest(`/v1/parcel-matches/${encodeURIComponent(matchId)}/dispute`, { method: "POST", body: JSON.stringify({ reason }) });
 
+// Notifies the sender to verify their identity via DigiLocker and sets
+// match.verificationRequestedAt — idempotent, so calling it more than once
+// (e.g. a retry) is safe and doesn't re-notify or error.
+export const requestSenderVerification = (matchId: string) =>
+  apiRequest(`/v1/parcel-matches/${encodeURIComponent(matchId)}/request-verification`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+
 // Payments — web completes a real PayU hosted-checkout redirect (see
 // /payment/result and requests/[id] "Pay now"). Backend echoes the payer's
 // firstName/email/phone here so the values submitted to PayU exactly match

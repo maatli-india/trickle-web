@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Mail, Smartphone } from "lucide-react";
+import { TrickleLogo } from "@/components/layout/trickle-logo";
 
 type FooterLink = { label: string; href: string };
 
@@ -47,8 +48,7 @@ export function SiteFooter() {
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr_1fr]">
           <div className="max-w-xs">
             <Link href="/" className="flex items-center gap-2.5" aria-label="Trickle home">
-              <span className="grid size-9 place-items-center rounded-xl bg-[#e85b43] text-lg font-bold text-white">T</span>
-              <span className="text-xl font-semibold tracking-[-0.03em] text-[#1b1d1c]">trickle</span>
+              <TrickleLogo size={32} />
             </Link>
             <p className="mt-4 text-sm leading-6">
               People-powered parcel delivery that follows the journey — matched with someone already going your way.

@@ -13,6 +13,26 @@ import { extractListItems, type ParcelMatch } from "@/types/travel";
 import { inputClass, labelClass } from "@/components/forms/location-fields";
 import { CATEGORIES, MAX_PHOTOS, PICKUP_HANDOVER_OPTIONS, DELIVERY_HANDOVER_OPTIONS, getHandoverOptions, BLOCKING_REQUEST_STATUSES } from "@/lib/request-form-constants";
 import { SafetyDeclarationModal, type SafetyDeclaration } from "@/components/forms/safety-declaration-modal";
+import { getRequestStatusLabel } from "@/lib/parcel-status";
+import { SavedAddressPicker } from "@/components/saved-address-picker";
+
+// Shared by the upfront on-mount guard and the submit-time safety-net check
+// in openDeclaration() below — both need the same "does the sender already
+// have a blocking request on this trip" answer, just at different points in
+// the flow.
+const findBlockingRequest = async (travelPlanId: string): Promise<ParcelMatch | null> => {
+  try {
+    const existing = extractListItems<ParcelMatch>((await listParcelMatches({ side: "sender", page: 1, limit: 100 })) as never);
+    return (
+      existing.find(
+        (request) => String(request.travelPlanId) === String(travelPlanId) && BLOCKING_REQUEST_STATUSES.has(String(request.status || "").toLowerCase()),
+      ) || null
+    );
+  } catch {
+    // If the check fails, fall through — the backend still owns final validation.
+    return null;
+  }
+};
 
 type Location = { address?: string; lat?: string | number; lng?: string | number };
 
@@ -68,6 +88,8 @@ export default function TravellerRequestPage() {
   const [waitlisted, setWaitlisted] = useState(false);
   const [interestLoading, setInterestLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
+  const [existingRequest, setExistingRequest] = useState<ParcelMatch | null>(null);
+  const [existingRequestChecked, setExistingRequestChecked] = useState(false);
 
   const [category, setCategory] = useState("documents");
   const [description, setDescription] = useState("");
@@ -80,6 +102,8 @@ export default function TravellerRequestPage() {
   const [amount, setAmount] = useState("");
   const [message, setMessage] = useState("");
   const [parcelImages, setParcelImages] = useState<File[]>([]);
+  const [showPickupPicker, setShowPickupPicker] = useState(false);
+  const [showDeliveryPicker, setShowDeliveryPicker] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -116,6 +140,21 @@ export default function TravellerRequestPage() {
       .then((interest) => setWaitlisted(Boolean((interest as { id?: string; _id?: string })?.id || (interest as { id?: string; _id?: string })?._id)))
       .catch(() => undefined)
       .finally(() => setInterestLoading(false));
+  }, [selection?.traveller.id, selection?.traveller.travelPlanId]);
+
+  // Upfront duplicate-request guard: runs as soon as the trip is known, so a
+  // sender who already has an active request on this trip sees that instead
+  // of the full form (or the trip-full/waitlist screen) in the first place,
+  // rather than only finding out after filling the form in and submitting.
+  useEffect(() => {
+    const travelPlanId = selection?.traveller.travelPlanId || selection?.traveller.id;
+    if (!travelPlanId) {
+      queueMicrotask(() => setExistingRequestChecked(true));
+      return;
+    }
+    findBlockingRequest(travelPlanId)
+      .then(setExistingRequest)
+      .finally(() => setExistingRequestChecked(true));
   }, [selection?.traveller.id, selection?.traveller.travelPlanId]);
 
   const joinWaitlist = async () => {
@@ -229,17 +268,10 @@ export default function TravellerRequestPage() {
       setError(`Package count must be between 1 and ${maxPackages}.`);
       return;
     }
-    try {
-      const existing = extractListItems<ParcelMatch>(await listParcelMatches({ side: "sender", page: 1, limit: 100 }) as never);
-      const hasExisting = existing.some(
-        (request) => String(request.travelPlanId) === String(travelPlanId) && BLOCKING_REQUEST_STATUSES.has(String(request.status || "").toLowerCase()),
-      );
-      if (hasExisting) {
-        setDuplicateAlert(true);
-        return;
-      }
-    } catch {
-      // If the duplicate check fails, fall through — the backend still owns final validation.
+    const blockingRequest = await findBlockingRequest(travelPlanId);
+    if (blockingRequest) {
+      setDuplicateAlert(true);
+      return;
     }
     setShowDeclaration(true);
   };
@@ -355,6 +387,45 @@ export default function TravellerRequestPage() {
                   View my requests
                 </button>
               </div>
+            ) : !existingRequestChecked ? (
+              <p className="text-sm text-[#62645f]">Checking your existing requests...</p>
+            ) : existingRequest ? (
+              // Takes priority over the trip-full/waitlist branch below — a
+              // sender who already has a request on this trip should see
+              // "you already have a request," not "trip is full," even if
+              // the trip also happens to be full.
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e85b43]">Traveller selected</p>
+                <div className="mt-2 flex items-center gap-3">
+                  <Avatar userId={travelerUserId} name={travellerName} className="size-12" />
+                  <h2 className="text-2xl font-semibold text-[#183b3a]">{travellerName}</h2>
+                </div>
+                <p className="mt-2 text-sm text-[#62645f]">
+                  ★ {rating ?? "Not rated"} <span className="px-1">·</span> {completedTrips} completed trips
+                </p>
+                <div className="mt-6 border-t border-[#ded8ce] pt-5 text-sm">
+                  <p className="font-semibold text-[#183b3a]">
+                    {selection.from.address || "Starting point"} <span className="px-1 text-[#e85b43]">→</span> {selection.to.address || "Destination"}
+                  </p>
+                  <p className="mt-3 text-[#62645f]">Pickup date: {selection.pickupDate || "Not provided"}</p>
+                </div>
+                <div className="mt-6 border-t border-[#ded8ce] pt-5">
+                  <h2 className="text-lg font-semibold text-[#183b3a]">You already sent a request</h2>
+                  <p className="mt-2 text-sm leading-6 text-[#62645f]">
+                    You can&apos;t send another request to {travellerName} for this same trip while your existing one is active.
+                  </p>
+                  <span className="mt-4 inline-block rounded-full bg-[#e7b65c] px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#183b3a]">
+                    {getRequestStatusLabel(existingRequest.status, "sender")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/requests/${existingRequest.id}?role=sender`)}
+                    className="mt-6 block w-full rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59]"
+                  >
+                    View request
+                  </button>
+                </div>
+              </div>
             ) : tripClosed ? (
               interestLoading ? (
                 <p className="text-sm text-[#62645f]">Checking notification status...</p>
@@ -465,7 +536,31 @@ export default function TravellerRequestPage() {
                     <p className="mt-2 text-sm text-[#62645f]">This trip has not specified pickup options.</p>
                   )}
                   {pickup === "point" && (
-                    <input value={pickupNote} onChange={(event) => setPickupNote(event.target.value)} placeholder="Suggest a meeting point (optional)" className={`${inputClass} mt-2`} />
+                    <div className="mt-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={pickupNote}
+                          onChange={(event) => setPickupNote(event.target.value)}
+                          placeholder="Suggest a meeting point (optional)"
+                          className="min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPickupPicker((current) => !current)}
+                          className="shrink-0 rounded-xl border border-[#d7d2c9] px-3 py-3 text-xs font-semibold text-[#183b3a] hover:border-[#e85b43]"
+                        >
+                          Use a saved address
+                        </button>
+                      </div>
+                      {showPickupPicker && (
+                        <SavedAddressPicker
+                          onSelect={(address) => {
+                            setPickupNote(address);
+                            setShowPickupPicker(false);
+                          }}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -489,7 +584,31 @@ export default function TravellerRequestPage() {
                     <p className="mt-2 text-sm text-[#62645f]">This trip has not specified delivery options.</p>
                   )}
                   {delivery === "point" && (
-                    <input value={deliveryNote} onChange={(event) => setDeliveryNote(event.target.value)} placeholder="Suggest a meeting point (optional)" className={`${inputClass} mt-2`} />
+                    <div className="mt-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={deliveryNote}
+                          onChange={(event) => setDeliveryNote(event.target.value)}
+                          placeholder="Suggest a meeting point (optional)"
+                          className="min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowDeliveryPicker((current) => !current)}
+                          className="shrink-0 rounded-xl border border-[#d7d2c9] px-3 py-3 text-xs font-semibold text-[#183b3a] hover:border-[#e85b43]"
+                        >
+                          Use a saved address
+                        </button>
+                      </div>
+                      {showDeliveryPicker && (
+                        <SavedAddressPicker
+                          onSelect={(address) => {
+                            setDeliveryNote(address);
+                            setShowDeliveryPicker(false);
+                          }}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
 

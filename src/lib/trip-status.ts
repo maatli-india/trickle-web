@@ -57,5 +57,10 @@ export const majorChangeAllowanceUsed = (plan: TravelPlan): boolean =>
       plan.allowanceUsed,
   );
 
+// Both the one-free-major-change cap and the price-change cap only exist
+// to protect a sender who already has a stake in this trip — while it has
+// never received a request, there's nobody to protect, so the allowance
+// cap doesn't apply (matches the backend's UpdateTravelPlan, which only
+// enforces these once the trip has at least one request).
 export const majorEditBlocked = (plan: TravelPlan, requests: ParcelMatch[]): boolean =>
-  hasPickedUpRequest(requests) || majorChangeAllowanceUsed(plan);
+  hasPickedUpRequest(requests) || (majorChangeAllowanceUsed(plan) && requests.length > 0);

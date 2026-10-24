@@ -15,7 +15,7 @@ const FAILURE_MESSAGES: Record<string, string> = {
   DENIED: "DigiLocker verification wasn't completed.",
   EXPIRED: "That verification link expired.",
   IDENTITY_MISMATCH:
-    "The DigiLocker account you used doesn't match your Trickle profile name. Please verify with the DigiLocker account registered in your own name.",
+    "The DigiLocker account you used doesn't match your Trickle profile's name, date of birth, or gender. Please verify with the DigiLocker account registered in your own name.",
   NO_PROFILE_DATA:
     "We couldn't retrieve your Aadhaar details from DigiLocker. Please make sure your Aadhaar is linked in your DigiLocker account.",
   EXCHANGE_FAILED: "DigiLocker verification could not be completed.",
