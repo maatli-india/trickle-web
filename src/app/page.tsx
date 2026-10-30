@@ -10,6 +10,7 @@ import { MatchPreview } from "@/components/home/match-preview";
 import { ParcelSearch } from "@/components/home/parcel-search";
 import { RouteSearchBox } from "@/components/home/route-search-box";
 import { TravelerCard, type NearbyTravelerPlan } from "@/components/home/traveler-card";
+import { UseCaseCarousel } from "@/components/home/use-case-carousel";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import type { LocationForm } from "@/components/forms/location-fields";
 import { useLocationPair } from "@/hooks/use-location-pair";
@@ -76,6 +77,10 @@ function PublicHome() {
             </div>
           </div>
           <MatchPreview />
+        </section>
+
+        <section className="pb-12 sm:pb-20">
+          <UseCaseCarousel />
         </section>
 
         <ParcelSearch />

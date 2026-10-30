@@ -20,7 +20,7 @@ const footerColumns: { title: string; links: FooterLink[] }[] = [
       { label: "About us", href: "/about" },
       { label: "Blog", href: "/blog" },
       { label: "Support", href: "/support" },
-      { label: "Contact us", href: "mailto:support@trickle.org.in" },
+      { label: "Contact us", href: "/contact" },
     ],
   },
   {

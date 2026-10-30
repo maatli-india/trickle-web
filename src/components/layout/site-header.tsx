@@ -72,7 +72,7 @@ export function SiteHeader() {
                 ["About us", "/about"],
                 ["Blog", "/blog"],
                 ["Support", "/support"],
-                ["Contact us", "mailto:support@trickle.org.in"],
+                ["Contact us", "/contact"],
                 ["Privacy policy", "/privacy"],
                 ["Terms", "/terms"],
                 ["FAQs", "/faqs"],
