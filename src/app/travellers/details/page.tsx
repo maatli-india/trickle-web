@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
+import { Avatar } from "@/components/ui/avatar";
 import { apiRequest } from "@/services/api-client";
 
 type Location = {
@@ -17,6 +18,7 @@ type Traveller = {
   [key: string]: unknown;
   id?: string;
   travelerId?: string;
+  travelerUserId?: string;
   userId?: string;
   name?: string;
   profilePicUrl?: string;
@@ -41,9 +43,17 @@ type Traveller = {
   departureDate?: string;
   arrivalDate?: string;
   travelMode?: string;
+  timezone?: string;
   maxWeightKg?: number;
   maxParcelCount?: number;
   acceptedParcelTypes?: string[];
+  acceptedParcelCategories?: string[];
+  restrictedParcelTypes?: string[];
+  pickupHandover?: string;
+  deliveryHandover?: string;
+  pickupHandovers?: string[];
+  deliveryHandovers?: string[];
+  senderDisplayPricePerPackage?: number;
   additionalInfo?: string;
 };
 type Selection = {
@@ -54,8 +64,11 @@ type Selection = {
   parcelNotes: string;
 };
 
-const formatDate = (value?: string) =>
-  value ? new Date(value).toLocaleString() : "Not provided";
+const formatDate = (value?: string) => {
+  if (!value) return "Not provided";
+  const date = new Date(String(value).replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
 const formatTravelMode = (value?: string) =>
   value ? value.replace("by_", "").replace(/_/g, " ") : "Not specified";
 
@@ -127,10 +140,7 @@ export default function TravellerDetailsPage() {
 
   const { traveller, from, to, pickupDate } = selection;
   const name = traveller.user?.name || traveller.name || "Traveller";
-  const profilePic =
-    traveller.user?.profilePicUrl ||
-    traveller.profilePicUrl ||
-    traveller.profilePicture;
+  const travelerUserId = traveller.travelerUserId || traveller.travelerId || traveller.userId || traveller.user?.id;
   const rating =
     traveller.user?.rating ??
     traveller.user?.ratings ??
@@ -158,17 +168,7 @@ export default function TravellerDetailsPage() {
         </button>
         <section className="mt-8 border-t-2 border-[#e85b43] bg-[#183b3a] p-6 text-white sm:p-10">
           <div className="flex flex-wrap items-center gap-5">
-            <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e7b65c] text-3xl font-semibold text-[#183b3a]">
-              {profilePic ? (
-                <img
-                  src={profilePic}
-                  alt={`${name} profile`}
-                  className="size-full object-cover"
-                />
-              ) : (
-                name.charAt(0).toUpperCase()
-              )}
-            </div>
+            <Avatar userId={travelerUserId} name={name} className="size-20 text-3xl" />
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#e7b65c]">
                 Traveller profile
@@ -221,6 +221,12 @@ export default function TravellerDetailsPage() {
               </dd>
             </div>
             <div>
+              <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-[#62645f]">Capacity</dt>
+              <dd className="mt-1 text-sm text-[#183b3a]">
+                {traveller.maxWeightKg ? `${traveller.maxWeightKg} kg` : "Weight not specified"} · {traveller.maxParcelCount ?? "No parcel limit set"} parcels
+              </dd>
+            </div>
+            <div>
               <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-[#62645f]">
                 Your pickup date
               </dt>
@@ -253,7 +259,15 @@ export default function TravellerDetailsPage() {
               </div>
               <div className="border border-[#ded8ce] bg-[#f6f2eb] p-4 sm:col-span-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#62645f]">Accepted parcel types</p>
-                {traveller.acceptedParcelTypes?.length ? <div className="mt-3 flex flex-wrap gap-2">{traveller.acceptedParcelTypes.map((type) => <span key={type} className="border border-[#e7b65c] bg-white px-3 py-1.5 text-sm font-medium capitalize text-[#183b3a]">{type.replace(/_/g, " ")}</span>)}</div> : <p className="mt-2 text-sm text-[#62645f]">Not specified</p>}
+                {traveller.acceptedParcelTypes?.length || traveller.acceptedParcelCategories?.length ? <div className="mt-3 flex flex-wrap gap-2">{[...(traveller.acceptedParcelTypes || []), ...(traveller.acceptedParcelCategories || [])].map((type) => <span key={type} className="border border-[#e7b65c] bg-white px-3 py-1.5 text-sm font-medium capitalize text-[#183b3a]">{type.replace(/_/g, " ")}</span>)}</div> : <p className="mt-2 text-sm text-[#62645f]">Not specified</p>}
+              </div>
+              <div className="border border-[#ded8ce] bg-[#f6f2eb] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#62645f]">Pickup handover</p>
+                <p className="mt-2 text-sm font-semibold capitalize text-[#183b3a]">{(traveller.pickupHandovers?.length ? traveller.pickupHandovers : traveller.pickupHandover ? [traveller.pickupHandover] : []).map((value) => value.replace(/_/g, " ")).join(", ") || "Not specified"}</p>
+              </div>
+              <div className="border border-[#ded8ce] bg-[#f6f2eb] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#62645f]">Delivery handover</p>
+                <p className="mt-2 text-sm font-semibold capitalize text-[#183b3a]">{(traveller.deliveryHandovers?.length ? traveller.deliveryHandovers : traveller.deliveryHandover ? [traveller.deliveryHandover] : []).map((value) => value.replace(/_/g, " ")).join(", ") || "Not specified"}</p>
               </div>
             </div>
           </div>

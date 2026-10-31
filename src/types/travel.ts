@@ -19,6 +19,11 @@ export type TravelPlan = {
   maxWeightKg?: number;
   maxParcelCount?: number;
   pricePerPackage?: number;
+  // Populated by the backend only for a non-owner viewer (e.g. a sender
+  // viewing this plan or a search result) — what they'd actually pay,
+  // commission/GST already applied server-side. The traveler viewing their
+  // own plan never gets this; they only ever see their own real rate above.
+  senderDisplayPricePerPackage?: number;
   timezone?: string;
   acceptedParcelTypes?: string[];
   acceptedParcelCategories?: string[];
@@ -41,12 +46,16 @@ export type TravelPlan = {
   [key: string]: unknown;
 };
 
+// OfferHistoryEntry is admin-only now (see transitorder's NewParcelMatchView
+// — offerHistory is never returned to a non-admin sender or traveler).
 export type OfferHistoryEntry = {
   status?: string;
   proposedBy?: "sender" | "traveler" | string;
   proposedByUserId?: string;
   proposedByUserID?: string;
   baseAmount?: number;
+  senderShownAmount?: number;
+  travelerShownAmount?: number;
   comment?: string;
   negotiationId?: string;
   createdAt?: string;
@@ -60,13 +69,29 @@ export type ParcelMatch = {
   senderName?: string;
   travelerName?: string;
   status: string;
-  baseAmount?: number;
-  agreedPrice?: number;
-  pricing?: { baseAmount?: number; senderPayableAmount?: number };
+  // Role-scoped amounts (see transitorder's NewParcelMatchView) — a viewer
+  // only ever receives the field(s) for their own role, never both.
+  // senderOfferedAmount: sender-only, always populated once pricing exists,
+  // regardless of status — the pre-GST amount they offered.
+  senderOfferedAmount?: number;
+  // senderPayableAmount: sender-only, the GST-inclusive checkout total —
+  // populated ONLY once the match has been accepted or later.
+  senderPayableAmount?: number;
+  // travelerDisplayAmount: traveler-only, this request's own agreed amount
+  // (sender-facing amount with the tier markup removed once) — diverges
+  // from the trip's listed pricePerPackage the moment a sender modifies
+  // their offer, so use this instead of the trip rate wherever a specific
+  // request's headline price is shown to the traveler.
+  travelerDisplayAmount?: number;
+  // travelerPayoutAmount: traveler-only, what they'll actually receive —
+  // travelerDisplayAmount minus half the tier markup. Populated as soon as
+  // pricing exists, even mid-negotiation.
+  travelerPayoutAmount?: number;
   from: Location;
   to: Location;
   targetDeliveryTime?: string;
   departureDate?: string;
+  arrivalDate?: string;
   parcelDescription?: string;
   parcelCategory?: string;
   parcelSubcategory?: string;
@@ -78,12 +103,32 @@ export type ParcelMatch = {
   deliveryOption?: string;
   deliveryNote?: string;
   note?: string;
+  // Membership only — an id appears here once Trickle has accepted the
+  // file, not necessarily in upload order. Not a display order.
+  parcelImageIds?: string[];
+  bookedByUserId?: string;
+  receiverUserId?: string;
   offerHistory?: OfferHistoryEntry[];
   paymentRef?: { status?: string };
+  // Set only when a traveler declines at pickup inspection
+  // (AcknowledgeInspection, Accepted:false) — status lands on
+  // cancelled_by_traveler same as a normal self-serve cancel, but
+  // `cancellation` below stays unset on this path; these are the only
+  // fields that carry the real reason/evidence for it.
+  disputeReason?: string;
+  declineReasonCode?: string;
+  declineEvidenceImageIds?: string[];
+  // Set only when the traveler themselves reported interrupt_in_transit
+  // (ResolveException) — traveler-only in the API response (NewParcelMatchView
+  // only copies it onto the view for that role), never present for a sender
+  // viewing the same match.
+  exceptionReason?: string;
   cancellation?: {
     cancelledBy?: string;
     cancelledByName?: string;
     reason?: string;
+    reasonCode?: string;
+    policy?: string;
     refundAmount?: number;
     refundStatus?: "refund_pending" | "refund_processing" | "refund_completed" | "refund_failed";
     refundTransactionId?: string;
@@ -92,6 +137,11 @@ export type ParcelMatch = {
     refundFailureReason?: string;
   };
   createdAt?: string;
+  // Set once the sender has been asked to verify their identity via
+  // DigiLocker for this match (request-verification) — idempotent on the
+  // backend, so this timestamp reflects the first request, not the most
+  // recent one. Present for both the sender and traveler viewer.
+  verificationRequestedAt?: string;
   [key: string]: unknown;
 };
 

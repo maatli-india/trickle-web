@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BellRing, Check, PackageX } from "lucide-react";
+import { AlertTriangle, BellRing, Check, PackageX } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
+import { Avatar } from "@/components/ui/avatar";
 import { apiRequest } from "@/services/api-client";
 import { listParcelMatches } from "@/services/parcel-matches";
 import { getTravelPlanInterest, recordTravelPlanView, registerTravelPlanInterest } from "@/services/travel-plans";
@@ -12,6 +13,26 @@ import { extractListItems, type ParcelMatch } from "@/types/travel";
 import { inputClass, labelClass } from "@/components/forms/location-fields";
 import { CATEGORIES, MAX_PHOTOS, PICKUP_HANDOVER_OPTIONS, DELIVERY_HANDOVER_OPTIONS, getHandoverOptions, BLOCKING_REQUEST_STATUSES } from "@/lib/request-form-constants";
 import { SafetyDeclarationModal, type SafetyDeclaration } from "@/components/forms/safety-declaration-modal";
+import { getRequestStatusLabel } from "@/lib/parcel-status";
+import { SavedAddressPicker } from "@/components/saved-address-picker";
+
+// Shared by the upfront on-mount guard and the submit-time safety-net check
+// in openDeclaration() below — both need the same "does the sender already
+// have a blocking request on this trip" answer, just at different points in
+// the flow.
+const findBlockingRequest = async (travelPlanId: string): Promise<ParcelMatch | null> => {
+  try {
+    const existing = extractListItems<ParcelMatch>((await listParcelMatches({ side: "sender", page: 1, limit: 100 })) as never);
+    return (
+      existing.find(
+        (request) => String(request.travelPlanId) === String(travelPlanId) && BLOCKING_REQUEST_STATUSES.has(String(request.status || "").toLowerCase()),
+      ) || null
+    );
+  } catch {
+    // If the check fails, fall through — the backend still owns final validation.
+    return null;
+  }
+};
 
 type Location = { address?: string; lat?: string | number; lng?: string | number };
 
@@ -28,11 +49,14 @@ type Traveller = {
   completedTrips?: number;
   totalCount?: number;
   departureDate?: string;
+  arrivalDate?: string;
+  travelMode?: string;
   from?: Location;
   to?: Location;
   maxWeightKg?: number;
   maxParcelCount?: number;
   pricePerPackage?: number;
+  senderDisplayPricePerPackage?: number;
   price?: number;
   pickupHandovers?: string[];
   pickupHandover?: string;
@@ -44,7 +68,11 @@ type Traveller = {
 
 type Selection = { traveller: Traveller; from: Location; to: Location; pickupDate: string; parcelNotes?: string };
 
-const formatDate = (value?: string) => (value ? new Date(value).toLocaleString() : "Not provided");
+const formatDate = (value?: string) => {
+  if (!value) return "Not provided";
+  const date = new Date(String(value).replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
 const maxParcelImageSize = 1024 * 1024;
 
 export default function TravellerRequestPage() {
@@ -60,6 +88,8 @@ export default function TravellerRequestPage() {
   const [waitlisted, setWaitlisted] = useState(false);
   const [interestLoading, setInterestLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
+  const [existingRequest, setExistingRequest] = useState<ParcelMatch | null>(null);
+  const [existingRequestChecked, setExistingRequestChecked] = useState(false);
 
   const [category, setCategory] = useState("documents");
   const [description, setDescription] = useState("");
@@ -72,6 +102,8 @@ export default function TravellerRequestPage() {
   const [amount, setAmount] = useState("");
   const [message, setMessage] = useState("");
   const [parcelImages, setParcelImages] = useState<File[]>([]);
+  const [showPickupPicker, setShowPickupPicker] = useState(false);
+  const [showDeliveryPicker, setShowDeliveryPicker] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -82,7 +114,7 @@ export default function TravellerRequestPage() {
           setSelection(parsed);
           setDescription(parsed.parcelNotes || "");
           setWeight(String(Math.min(1, Number(parsed.traveller.maxWeightKg) || 1)));
-          setAmount(String(parsed.traveller.pricePerPackage || parsed.traveller.price || ""));
+          setAmount(String(parsed.traveller.senderDisplayPricePerPackage ?? parsed.traveller.pricePerPackage ?? parsed.traveller.price ?? ""));
           setAcceptingNewRequests(parsed.traveller.acceptingNewRequests !== false);
         }
       } catch {
@@ -108,6 +140,21 @@ export default function TravellerRequestPage() {
       .then((interest) => setWaitlisted(Boolean((interest as { id?: string; _id?: string })?.id || (interest as { id?: string; _id?: string })?._id)))
       .catch(() => undefined)
       .finally(() => setInterestLoading(false));
+  }, [selection?.traveller.id, selection?.traveller.travelPlanId]);
+
+  // Upfront duplicate-request guard: runs as soon as the trip is known, so a
+  // sender who already has an active request on this trip sees that instead
+  // of the full form (or the trip-full/waitlist screen) in the first place,
+  // rather than only finding out after filling the form in and submitting.
+  useEffect(() => {
+    const travelPlanId = selection?.traveller.travelPlanId || selection?.traveller.id;
+    if (!travelPlanId) {
+      queueMicrotask(() => setExistingRequestChecked(true));
+      return;
+    }
+    findBlockingRequest(travelPlanId)
+      .then(setExistingRequest)
+      .finally(() => setExistingRequestChecked(true));
   }, [selection?.traveller.id, selection?.traveller.travelPlanId]);
 
   const joinWaitlist = async () => {
@@ -171,6 +218,8 @@ export default function TravellerRequestPage() {
 
   const { traveller, from, to, pickupDate } = selection;
   const travellerName = traveller.user?.name || traveller.name || "Traveller";
+  const travelerUserId = traveller.travelerUserId || traveller.travelerId || traveller.userId || traveller.user?.id;
+  const defaultAmount = Number(traveller.senderDisplayPricePerPackage ?? traveller.pricePerPackage ?? traveller.price ?? 0);
   const rating = traveller.user?.rating ?? traveller.user?.ratings ?? traveller.rating ?? traveller.ratings;
   const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips ?? 0;
   const pickupOptions = getHandoverOptions(traveller, "pickupHandovers", "pickupHandover", PICKUP_HANDOVER_OPTIONS);
@@ -219,17 +268,10 @@ export default function TravellerRequestPage() {
       setError(`Package count must be between 1 and ${maxPackages}.`);
       return;
     }
-    try {
-      const existing = extractListItems<ParcelMatch>(await listParcelMatches({ side: "sender", page: 1, limit: 100 }) as never);
-      const hasExisting = existing.some(
-        (request) => String(request.travelPlanId) === String(travelPlanId) && BLOCKING_REQUEST_STATUSES.has(String(request.status || "").toLowerCase()),
-      );
-      if (hasExisting) {
-        setDuplicateAlert(true);
-        return;
-      }
-    } catch {
-      // If the duplicate check fails, fall through — the backend still owns final validation.
+    const blockingRequest = await findBlockingRequest(travelPlanId);
+    if (blockingRequest) {
+      setDuplicateAlert(true);
+      return;
     }
     setShowDeclaration(true);
   };
@@ -257,7 +299,7 @@ export default function TravellerRequestPage() {
           travelerName: travellerName,
           parcelType: category,
           parcelCategory: category,
-          baseAmount: Number(amount),
+          amount: Number(amount) * Math.max(1, numericPackageCount),
           from: { address: from.address, lat: Number(from.lat), lng: Number(from.lng) },
           to: { address: to.address, lat: Number(to.lat), lng: Number(to.lng) },
           targetDeliveryTime: pickupDate,
@@ -315,7 +357,10 @@ export default function TravellerRequestPage() {
           <div className="space-y-6">
             <div className="bg-[#fbfaf7] p-6 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e85b43]">Traveller selected</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#183b3a]">{travellerName}</h2>
+              <div className="mt-2 flex items-center gap-3">
+                <Avatar userId={travelerUserId} name={travellerName} className="size-12" />
+                <h2 className="text-2xl font-semibold text-[#183b3a]">{travellerName}</h2>
+              </div>
               <p className="mt-2 text-sm text-[#62645f]">
                 ★ {rating ?? "Not rated"} <span className="px-1">·</span> {completedTrips} completed trips
               </p>
@@ -325,6 +370,8 @@ export default function TravellerRequestPage() {
                 </p>
                 <p className="mt-3 text-[#62645f]">Pickup date: {selection.pickupDate || "Not provided"}</p>
                 <p className="mt-2 text-[#62645f]">Departure: {formatDate(selection.traveller.departureDate)}</p>
+                <p className="mt-2 text-[#62645f]">Arrival: {formatDate(selection.traveller.arrivalDate)}</p>
+                <p className="mt-2 capitalize text-[#62645f]">Travel mode: {selection.traveller.travelMode?.replace("by_", " ") || "Not provided"}</p>
                 <p className="mt-2 text-[#62645f]">Capacity: up to {maxWeight} kg · {maxPackages} parcels</p>
               </div>
             </div>
@@ -339,6 +386,45 @@ export default function TravellerRequestPage() {
                 <button type="button" onClick={() => router.push("/requests")} className="mt-6 rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59]">
                   View my requests
                 </button>
+              </div>
+            ) : !existingRequestChecked ? (
+              <p className="text-sm text-[#62645f]">Checking your existing requests...</p>
+            ) : existingRequest ? (
+              // Takes priority over the trip-full/waitlist branch below — a
+              // sender who already has a request on this trip should see
+              // "you already have a request," not "trip is full," even if
+              // the trip also happens to be full.
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e85b43]">Traveller selected</p>
+                <div className="mt-2 flex items-center gap-3">
+                  <Avatar userId={travelerUserId} name={travellerName} className="size-12" />
+                  <h2 className="text-2xl font-semibold text-[#183b3a]">{travellerName}</h2>
+                </div>
+                <p className="mt-2 text-sm text-[#62645f]">
+                  ★ {rating ?? "Not rated"} <span className="px-1">·</span> {completedTrips} completed trips
+                </p>
+                <div className="mt-6 border-t border-[#ded8ce] pt-5 text-sm">
+                  <p className="font-semibold text-[#183b3a]">
+                    {selection.from.address || "Starting point"} <span className="px-1 text-[#e85b43]">→</span> {selection.to.address || "Destination"}
+                  </p>
+                  <p className="mt-3 text-[#62645f]">Pickup date: {selection.pickupDate || "Not provided"}</p>
+                </div>
+                <div className="mt-6 border-t border-[#ded8ce] pt-5">
+                  <h2 className="text-lg font-semibold text-[#183b3a]">You already sent a request</h2>
+                  <p className="mt-2 text-sm leading-6 text-[#62645f]">
+                    You can&apos;t send another request to {travellerName} for this same trip while your existing one is active.
+                  </p>
+                  <span className="mt-4 inline-block rounded-full bg-[#e7b65c] px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#183b3a]">
+                    {getRequestStatusLabel(existingRequest.status, "sender")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/requests/${existingRequest.id}?role=sender`)}
+                    className="mt-6 block w-full rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59]"
+                  >
+                    View request
+                  </button>
+                </div>
               </div>
             ) : tripClosed ? (
               interestLoading ? (
@@ -450,7 +536,31 @@ export default function TravellerRequestPage() {
                     <p className="mt-2 text-sm text-[#62645f]">This trip has not specified pickup options.</p>
                   )}
                   {pickup === "point" && (
-                    <input value={pickupNote} onChange={(event) => setPickupNote(event.target.value)} placeholder="Suggest a meeting point (optional)" className={`${inputClass} mt-2`} />
+                    <div className="mt-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={pickupNote}
+                          onChange={(event) => setPickupNote(event.target.value)}
+                          placeholder="Suggest a meeting point (optional)"
+                          className="min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPickupPicker((current) => !current)}
+                          className="shrink-0 rounded-xl border border-[#d7d2c9] px-3 py-3 text-xs font-semibold text-[#183b3a] hover:border-[#e85b43]"
+                        >
+                          Use a saved address
+                        </button>
+                      </div>
+                      {showPickupPicker && (
+                        <SavedAddressPicker
+                          onSelect={(address) => {
+                            setPickupNote(address);
+                            setShowPickupPicker(false);
+                          }}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -474,14 +584,58 @@ export default function TravellerRequestPage() {
                     <p className="mt-2 text-sm text-[#62645f]">This trip has not specified delivery options.</p>
                   )}
                   {delivery === "point" && (
-                    <input value={deliveryNote} onChange={(event) => setDeliveryNote(event.target.value)} placeholder="Suggest a meeting point (optional)" className={`${inputClass} mt-2`} />
+                    <div className="mt-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={deliveryNote}
+                          onChange={(event) => setDeliveryNote(event.target.value)}
+                          placeholder="Suggest a meeting point (optional)"
+                          className="min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowDeliveryPicker((current) => !current)}
+                          className="shrink-0 rounded-xl border border-[#d7d2c9] px-3 py-3 text-xs font-semibold text-[#183b3a] hover:border-[#e85b43]"
+                        >
+                          Use a saved address
+                        </button>
+                      </div>
+                      {showDeliveryPicker && (
+                        <SavedAddressPicker
+                          onSelect={(address) => {
+                            setDeliveryNote(address);
+                            setShowDeliveryPicker(false);
+                          }}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
 
                 <label className={labelClass}>
                   Your offer
+                  {defaultAmount > 0 && (
+                    <span className="mb-1.5 block text-xs font-normal normal-case tracking-normal text-[#8a8579]">
+                      Prefilled from {travellerName.split(" ")[0]}&apos;s price of ₹{defaultAmount} per package — not a total. Adjust it if you&apos;re sending more than one package.
+                    </span>
+                  )}
                   <input required type="number" min={1} value={amount} onChange={(event) => setAmount(event.target.value)} className={inputClass} placeholder="₹" />
                 </label>
+
+                {Number(amount) > 0 && numericPackageCount > 1 && (
+                  <p className="inline-block w-fit rounded-full bg-[#e5f0eb] px-3 py-1.5 text-xs font-semibold text-[#285c59]">
+                    ₹{amount} × {numericPackageCount} packages = ₹{Number(amount) * numericPackageCount} total
+                  </p>
+                )}
+
+                {defaultAmount > 0 && Number(amount) > 0 && Number(amount) < defaultAmount && (
+                  <p className="flex items-start gap-2 rounded-lg bg-[#fff4d8] px-3.5 py-2.5 text-xs leading-5 text-[#7a5310]">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>
+                      This is below {travellerName.split(" ")[0]}&apos;s listed price of ₹{defaultAmount} — not a hard rule, but offers below it are more likely to get declined.
+                    </span>
+                  </p>
+                )}
 
                 <label className={labelClass}>
                   Message to traveller (optional)

@@ -10,6 +10,7 @@ import { MatchPreview } from "@/components/home/match-preview";
 import { ParcelSearch } from "@/components/home/parcel-search";
 import { RouteSearchBox } from "@/components/home/route-search-box";
 import { TravelerCard, type NearbyTravelerPlan } from "@/components/home/traveler-card";
+import { UseCaseCarousel } from "@/components/home/use-case-carousel";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import type { LocationForm } from "@/components/forms/location-fields";
 import { useLocationPair } from "@/hooks/use-location-pair";
@@ -21,7 +22,8 @@ import { dismissHomeOverlay, listParcelMatches } from "@/services/parcel-matches
 import { listNotifications, type Notification } from "@/services/notifications";
 import { extractListItems, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { isActiveIncomingRequest } from "@/lib/parcel-status";
-import { ALL_CATEGORIES, CATEGORIES, MOCK_NEARBY_ARRIVALS, POPULAR_ITEMS, TINTS, getDateOptions } from "@/lib/home-constants";
+import { formatCategory } from "@/lib/format-category";
+import { ALL_CATEGORIES, CATEGORIES, POPULAR_ITEMS, TINTS, getDateOptions } from "@/lib/home-constants";
 import { dedupeRecentSearches, recentSearchesStorageKey } from "@/lib/recent-searches";
 
 type RecentSearch = { from: LocationForm; to: LocationForm; pickupDate: string; parcelNotes: string; parcelCategory?: string; travellers?: unknown[] };
@@ -75,6 +77,10 @@ function PublicHome() {
             </div>
           </div>
           <MatchPreview />
+        </section>
+
+        <section className="pb-12 sm:pb-20">
+          <UseCaseCarousel />
         </section>
 
         <ParcelSearch />
@@ -265,6 +271,7 @@ type HomeTraveller = {
   maxParcelCount?: number;
   acceptedParcelTypes?: string[];
   pricePerPackage?: number;
+  senderDisplayPricePerPackage?: number;
   name?: string;
   rating?: number;
 };
@@ -296,6 +303,9 @@ function AuthenticatedHome() {
   const [nearbyTravelers, setNearbyTravelers] = useState<NearbyTravelerPlan[]>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState("");
+  const [arrivingTravelers, setArrivingTravelers] = useState<NearbyTravelerPlan[]>([]);
+  const [arrivingLoading, setArrivingLoading] = useState(false);
+  const [arrivingError, setArrivingError] = useState("");
   const [nearbyExpanded, setNearbyExpanded] = useState(false);
   const [arrivingExpanded, setArrivingExpanded] = useState(false);
   const [requestCards, setRequestCards] = useState<ParcelMatch[]>([]);
@@ -304,10 +314,6 @@ function AuthenticatedHome() {
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [routeAlert, setRouteAlert] = useState<{ title: string; message: string } | null>(null);
 
-  const arrivingTravelers: NearbyTravelerPlan[] = useMemo(
-    () => MOCK_NEARBY_ARRIVALS.map((plan) => ({ ...plan, profile: { name: plan.travelerName, rating: plan.rating } })),
-    [],
-  );
   const currentArea = currentLocation.address || "Locating...";
 
   useEffect(() => {
@@ -336,15 +342,19 @@ function AuthenticatedHome() {
 
   useEffect(() => {
     if (!currentLocation.lat || !currentLocation.lng) {
-      queueMicrotask(() => setNearbyTravelers([]));
+      queueMicrotask(() => {
+        setNearbyTravelers([]);
+        setArrivingTravelers([]);
+      });
       return;
     }
     queueMicrotask(() => {
       setNearbyLoading(true);
       setNearbyError("");
+      setArrivingLoading(true);
+      setArrivingError("");
     });
-    searchTravelPlans({ lat: Number(currentLocation.lat), lng: Number(currentLocation.lng), radiusKm: 75, upcoming: true, status: "active", page: 1, limit: 10 })
-      .then(async (response) => {
+    const enrichPlans = async (response: unknown) => {
         const plans = extractListItems<Record<string, unknown>>(response as never);
         const entries = await Promise.all(
           plans.map(async (plan) => {
@@ -361,13 +371,34 @@ function AuthenticatedHome() {
           }),
         );
         const profiles = Object.fromEntries(entries);
-        setNearbyTravelers(plans.map((plan) => ({ ...(plan as unknown as NearbyTravelerPlan), profile: profiles[String(plan.id)] || {} })));
-      })
+        return plans.map((plan) => ({ ...(plan as unknown as NearbyTravelerPlan), profile: profiles[String(plan.id)] || {} }));
+      };
+    searchTravelPlans({ lat: Number(currentLocation.lat), lng: Number(currentLocation.lng), radiusKm: 75, upcoming: true, status: "active", page: 1, limit: 10 })
+      .then(enrichPlans)
+      .then(setNearbyTravelers)
       .catch((error) => {
         setNearbyTravelers([]);
         setNearbyError(error instanceof Error ? error.message : "Nearby traveler data is unavailable right now.");
       })
       .finally(() => setNearbyLoading(false));
+    searchTravelPlans({
+      lat: Number(currentLocation.lat),
+      lng: Number(currentLocation.lng),
+      destinationLat: Number(currentLocation.lat),
+      destinationLng: Number(currentLocation.lng),
+      radiusKm: 75,
+      upcoming: true,
+      status: "active",
+      page: 1,
+      limit: 10,
+    })
+      .then(enrichPlans)
+      .then(setArrivingTravelers)
+      .catch((error) => {
+        setArrivingTravelers([]);
+        setArrivingError(error instanceof Error ? error.message : "Arriving traveler data is unavailable right now.");
+      })
+      .finally(() => setArrivingLoading(false));
   }, [currentLocation.lat, currentLocation.lng]);
 
   const swapLocations = () => {
@@ -413,7 +444,7 @@ function AuthenticatedHome() {
       to: plan.to,
       departureDate: plan.departureDate,
       arrivalDate: plan.arrivalDate,
-      pricePerPackage: plan.pricePerPackage,
+      pricePerPackage: plan.senderDisplayPricePerPackage ?? plan.pricePerPackage,
     };
     window.sessionStorage.setItem(
       "trickle.web.selectedTraveller",
@@ -587,14 +618,14 @@ function AuthenticatedHome() {
                       <Package size={12} />
                       New parcel request
                     </p>
-                    <p className="mt-2 line-clamp-2 text-sm font-semibold text-[#183b3a]">{request.parcelDescription || request.parcelCategory || "Parcel request"}</p>
+                    <p className="mt-2 line-clamp-2 text-sm font-semibold text-[#183b3a]">{request.parcelDescription || formatCategory(request.parcelCategory) || "Parcel request"}</p>
                     <p className="mt-1 text-xs text-[#62645f]">From {request.senderName || "Sender"}</p>
                     <p className="mt-2 truncate text-xs text-[#62645f]">
                       {request.from?.address || "Origin"} → {request.to?.address || "Destination"}
                     </p>
                     <div className="mt-3 flex items-center justify-between border-t border-[#f0e6c9] pt-2">
-                      <span className="text-xs text-[#62645f]">Offered amount</span>
-                      <span className="text-sm font-semibold text-[#183b3a]">{request.agreedPrice || request.baseAmount ? `₹${request.agreedPrice || request.baseAmount}` : "Review offer"}</span>
+                      <span className="text-xs text-[#62645f]">You&apos;ll earn</span>
+                      <span className="text-sm font-semibold text-[#183b3a]">{request.travelerPayoutAmount ? `₹${request.travelerPayoutAmount}` : "Review offer"}</span>
                     </div>
                     <p className="mt-2 text-xs font-semibold text-[#e85b43]">Review request →</p>
                   </button>
@@ -653,13 +684,21 @@ function AuthenticatedHome() {
         <section className="pt-8">
           <div className="flex items-center justify-between gap-3">
             <h2 className="min-w-0 text-base font-semibold text-[#183b3a]">Travelers departing from {currentArea === "Locating..." ? "your area" : currentArea}</h2>
-            {nearbyTravelers.length > 5 && (
+            {nearbyTravelers.length > 4 && (
               <button type="button" onClick={() => setNearbyExpanded((value) => !value)} className="shrink-0 text-xs font-semibold text-[#e85b43]">
                 {nearbyExpanded ? "Show less" : "See all"}
               </button>
             )}
           </div>
           <p className="text-sm text-[#a7a297]">Active trips starting near your current location</p>
+          {/* Shown once here rather than repeated under both sections — stays
+              visible as long as either list has results. */}
+          {!nearbyLoading && !nearbyError && (nearbyTravelers.length > 0 || arrivingTravelers.length > 0) && (
+            <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-[#085041]">
+              <ShieldCheck size={13} className="shrink-0" />
+              Tip: for extra peace of mind, we recommend choosing verified travellers.
+            </p>
+          )}
           {nearbyLoading && <p className="mt-4 text-sm text-[#a7a297]">Looking for active travelers near you...</p>}
           {!nearbyLoading && nearbyError && (
             <NearbyStatusCard
@@ -675,7 +714,7 @@ function AuthenticatedHome() {
             />
           )}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {nearbyTravelers.slice(0, nearbyExpanded ? undefined : 5).map((plan) => (
+            {nearbyTravelers.slice(0, nearbyExpanded ? undefined : 4).map((plan) => (
               <TravelerCard key={plan.id} plan={plan} direction="departure" currentArea={currentArea} className="w-full" onSelect={() => openTravelerRequest(plan as NearbyTravelerPlan & HomeTraveller)} />
             ))}
           </div>
@@ -684,19 +723,29 @@ function AuthenticatedHome() {
         <section className="pt-8">
           <div className="flex items-center justify-between gap-3">
             <h2 className="min-w-0 text-base font-semibold text-[#183b3a]">Travelers arriving near {currentArea === "Locating..." ? "your area" : currentArea}</h2>
-            <button type="button" onClick={() => setArrivingExpanded((value) => !value)} className="shrink-0 text-xs font-semibold text-[#e85b43]">
-              {arrivingExpanded ? "Show less" : "See all"}
-            </button>
+            {arrivingTravelers.length > 4 && (
+              <button type="button" onClick={() => setArrivingExpanded((value) => !value)} className="shrink-0 text-xs font-semibold text-[#e85b43]">
+                {arrivingExpanded ? "Show less" : "See all"}
+              </button>
+            )}
           </div>
           <p className="text-sm text-[#a7a297]">Active trips ending near your current location</p>
-          {!arrivingTravelers.length && (
+          {arrivingLoading && <p className="mt-4 text-sm text-[#a7a297]">Looking for travelers arriving nearby...</p>}
+          {!arrivingLoading && arrivingError && (
+            <NearbyStatusCard
+              title="Nearby arrivals are temporarily unavailable"
+              message="We could not load travelers arriving near this area. Please check again shortly."
+              error
+            />
+          )}
+          {!arrivingLoading && !arrivingError && !arrivingTravelers.length && (
             <NearbyStatusCard
               title="No arrivals nearby yet"
               message="We will show travelers arriving near this area as soon as an active trip is available."
             />
           )}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {arrivingTravelers.slice(0, arrivingExpanded ? undefined : 5).map((plan) => (
+            {arrivingTravelers.slice(0, arrivingExpanded ? undefined : 4).map((plan) => (
               <TravelerCard key={plan.id} plan={plan} direction="arrival" currentArea={currentArea} className="w-full" onSelect={() => openTravelerRequest(plan as NearbyTravelerPlan & HomeTraveller)} />
             ))}
           </div>

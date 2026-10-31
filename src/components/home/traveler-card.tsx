@@ -1,17 +1,21 @@
 "use client";
 
 import { ArrowDownLeft, ArrowUpRight, Package, Plane, ShieldCheck, Star } from "lucide-react";
-import { avatarTint, initials } from "@/lib/home-constants";
+import { Avatar } from "@/components/ui/avatar";
 
 export type NearbyTravelerPlan = {
   id: string;
+  travelerId?: string;
+  travelerUserId?: string;
+  travellerId?: string;
   from?: { address?: string };
   to?: { address?: string };
   departureDate?: string;
   arrivalDate?: string;
   pricePerPackage?: number;
+  senderDisplayPricePerPackage?: number;
   travelerReliabilityBadge?: { score?: number };
-  profile?: { name?: string; rating?: number };
+  profile?: { name?: string; rating?: number; verified?: boolean };
 };
 
 const place = (location: { address?: string } | undefined, fallback: string) => location?.address || fallback;
@@ -30,9 +34,9 @@ export function TravelerCard({
   className?: string;
 }) {
   const name = plan.profile?.name || "Traveller";
-  const tint = avatarTint(name);
-  const travelDate = direction === "arrival" ? plan.arrivalDate : plan.departureDate;
+  const travelDate = plan.departureDate;
   const dateObj = travelDate ? new Date(travelDate) : null;
+  const travelerUserId = plan.travelerUserId || plan.travelerId || plan.travellerId;
 
   return (
     <button
@@ -42,13 +46,11 @@ export function TravelerCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-full text-xs font-bold" style={{ backgroundColor: tint.bg, color: tint.fg }}>
-            {initials(name)}
-          </span>
+          <Avatar userId={travelerUserId} name={name} className="size-9 text-xs" />
           <div className="min-w-0">
             <div className="flex items-center gap-1">
               <p className="truncate text-sm font-semibold text-[#183b3a]">{name}</p>
-              <ShieldCheck size={12} className="shrink-0 text-[#0f6e56]" />
+              {plan.profile?.verified && <ShieldCheck size={12} className="shrink-0 text-[#0f6e56]" aria-label="Verified" />}
             </div>
             <div className="flex items-center gap-1 text-xs text-[#a7a297]">
               <Star size={11} className="fill-[#e7b65c] text-[#e7b65c]" />
@@ -56,7 +58,7 @@ export function TravelerCard({
             </div>
           </div>
         </div>
-        <p className="shrink-0 text-sm font-semibold text-[#183b3a]">{plan.pricePerPackage ? `₹${plan.pricePerPackage}` : "Open"}</p>
+        <p className="shrink-0 text-sm font-semibold text-[#183b3a]">{plan.senderDisplayPricePerPackage ?? plan.pricePerPackage ? `₹${plan.senderDisplayPricePerPackage ?? plan.pricePerPackage}` : "Open"}</p>
       </div>
 
       <span
@@ -87,7 +89,7 @@ export function TravelerCard({
       )}
       <p className="mt-2 flex items-center gap-1.5 text-xs text-[#a7a297]">
         <Package size={11} />
-        from ₹{plan.pricePerPackage || "open"}
+        from ₹{plan.senderDisplayPricePerPackage ?? plan.pricePerPackage ?? "open"}
       </p>
     </button>
   );

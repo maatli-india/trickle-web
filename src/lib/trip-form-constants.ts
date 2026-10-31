@@ -1,6 +1,7 @@
 // Ported 1:1 from mobile's src/screens/CreateTrip/index.js so the same UI
 // choices map to the same backend enum values on both platforms.
-import type { TravelMode } from "@/types/travel";
+import type { TravelMode, TravelPlan } from "@/types/travel";
+import type { LocationForm } from "@/components/forms/location-fields";
 
 export const MODES: { key: string; apiKey: TravelMode; label: string }[] = [
   { key: "flight", apiKey: "by_flight", label: "Flight" },
@@ -66,3 +67,57 @@ export const apiDate = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(
     date.getHours(),
   ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:00`;
+
+// Maps a plan's already-API-shaped pickupHandovers/deliveryHandovers (or the
+// older single pickupHandover/deliveryHandover) back to the UI keys — shared
+// by the edit page's pre-fill and tripFormPrefillFromPlan below.
+export const keysFromApiValues = (values: string[] | undefined, single: string | undefined, map: Record<string, string>): Set<string> => {
+  const source = values?.length ? values : single ? [single] : [];
+  return new Set(source.map((value) => map[value]).filter(Boolean) as string[]);
+};
+
+// acceptedParcelCategories carries the UI's own keys verbatim (lossless —
+// acceptedParcelTypes alone can't tell "gifts" apart from "food", both map
+// to small_packages), same precedence the create page's own submit payload
+// implies: categories first, falling back to reverse-mapping the API enum.
+const acceptedKeysFromPlan = (plan: TravelPlan): Set<string> => {
+  const validKeys = new Set(ACCEPTED.map((item) => item.key));
+  const categories = (plan.acceptedParcelCategories || []).filter((key) => validKeys.has(key));
+  if (categories.length) return new Set(categories);
+  const apiTypes = new Set(plan.acceptedParcelTypes || []);
+  const fromTypes = Object.entries(ACCEPTED_API_TYPES)
+    .filter(([, apiValue]) => apiTypes.has(apiValue))
+    .map(([key]) => key);
+  return new Set(fromTypes.length ? fromTypes : ["documents"]);
+};
+
+export type TripFormPrefill = {
+  from: LocationForm;
+  to: LocationForm;
+  mode: string;
+  pickup: Set<string>;
+  delivery: Set<string>;
+  accepted: Set<string>;
+  restricted: Set<string>;
+  maxWeight: string;
+  maxParcelCount: string;
+  price: string;
+};
+
+// Maps an existing TravelPlan (as returned by GET /v1/travel-plans/{id}) into
+// the create page's form-state shape, for the "Repeat this trip" action —
+// everything except departure/arrival is carried over; those are left for
+// the create page's own "" defaults so the traveler always picks a fresh
+// date/time.
+export const tripFormPrefillFromPlan = (plan: TravelPlan): TripFormPrefill => ({
+  from: { address: plan.from?.address || "", lat: plan.from?.lat != null ? String(plan.from.lat) : "", lng: plan.from?.lng != null ? String(plan.from.lng) : "" },
+  to: { address: plan.to?.address || "", lat: plan.to?.lat != null ? String(plan.to.lat) : "", lng: plan.to?.lng != null ? String(plan.to.lng) : "" },
+  mode: MODES.find((item) => item.apiKey === plan.travelMode)?.key || "flight",
+  pickup: keysFromApiValues(plan.pickupHandovers, plan.pickupHandover, PICKUP_KEY_FROM_API),
+  delivery: keysFromApiValues(plan.deliveryHandovers, plan.deliveryHandover, DELIVERY_KEY_FROM_API),
+  accepted: acceptedKeysFromPlan(plan),
+  restricted: new Set(plan.restrictedParcelTypes || []),
+  maxWeight: String(plan.maxWeightKg || 5),
+  maxParcelCount: String(plan.maxParcelCount || 1),
+  price: plan.pricePerPackage ? String(plan.pricePerPackage) : "",
+});

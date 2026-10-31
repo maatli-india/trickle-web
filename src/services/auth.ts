@@ -11,7 +11,7 @@ const createDeviceId = () => {
   return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-const buildDeviceDetails = () => ({
+export const buildDeviceDetails = () => ({
   appVersion: "1.0.0",
   token: "web",
   os: "web",
@@ -134,8 +134,15 @@ export type RegistrationProfile = {
   email: string;
   phone: string;
   phoneExt: string;
-  gender: "male" | "female" | "other";
-  dob: string;
+  // Optional at signup — the account/settings page asks for either one,
+  // once, right before starting DigiLocker verification if still missing.
+  // Once saved (here or there), the backend locks them permanently.
+  gender?: "male" | "female" | "other";
+  dob?: string;
+  // Kosh file id from a signup-token profile-pic upload. The phone/email in
+  // this body must match the identity the signup token was issued for
+  // (mismatch is 403); a FAILED upload is 409, an already-used picture 409.
+  profilePicId?: string;
 };
 
 export const createUser = async (profile: RegistrationProfile) => {

@@ -22,6 +22,7 @@ export const mapRequestStatus = (status?: string): string => {
     returned: "returned",
     cancelled_by_sender: "cancelled_by_sender",
     cancelled_by_traveler: "cancelled_by_traveler",
+    not_picked_up: "not_picked_up",
     in_transit: "in_transit",
     delivered: "completed",
     completed: "completed",
@@ -54,6 +55,7 @@ export const getRequestStatusLabel = (status?: string, role: ViewerRole = "trave
     returned: "Returned",
     cancelled_by_sender: "Cancelled by sender",
     cancelled_by_traveler: "Cancelled by traveller",
+    not_picked_up: "No-show reported",
     in_transit: "In transit",
     delivered: "Completed",
     completed: "Completed",
@@ -87,6 +89,10 @@ export const bucketRequestStatus = (status?: string): RequestBucket => {
     expired: "cancelled",
     cancelled_by_sender: "cancelled",
     cancelled_by_traveler: "cancelled",
+    not_picked_up: "cancelled",
+    interrupted_in_transit: "cancelled",
+    awaiting_recipient: "cancelled",
+    return_pending: "cancelled",
     cancelled: "cancelled",
     rejected: "declined",
     declined: "declined",
@@ -135,13 +141,10 @@ export const relevantMatchDate = (match: { targetDeliveryTime?: string; departur
 
 export const formatMoney = (value?: number) => (value || value === 0 ? `₹${value}` : "Offer pending");
 
-// Ported from mobile Home's activeIncomingRequest() — a traveler-side request
-// that's genuinely waiting on the traveler (not one where the traveler just
-// sent a counter-offer that's awaiting the sender instead).
-export const isActiveIncomingRequest = (request: {
-  status?: string;
-  travelerUserId?: string;
-  offerHistory?: { status?: string; proposedByUserId?: string }[];
-}): boolean =>
-  ["pending", "searching", "negotiating", "countered"].includes(String(request.status || "").toLowerCase()) &&
-  !request.offerHistory?.some((offer) => offer.status === "pending" && offer.proposedByUserId === request.travelerUserId);
+// Ported from mobile Home's activeIncomingRequest() — a traveler-side
+// request that's genuinely waiting on the traveler. Counter-offer
+// negotiation is disabled (offerHistory is admin-only now — see
+// transitorder's NewParcelMatchView), so any request in one of these
+// statuses is, by definition, still awaiting the traveler's own response.
+export const isActiveIncomingRequest = (request: { status?: string }): boolean =>
+  ["pending", "searching", "negotiating", "countered"].includes(String(request.status || "").toLowerCase());

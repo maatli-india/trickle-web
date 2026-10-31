@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Avatar } from "@/components/ui/avatar";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -10,14 +11,16 @@ import {
   cancelTravelPlan,
   getTravelPlanById,
   listParcelMatchesForPlan,
+  previewTripPricing,
   recordTravelPlanView,
   updateTravelPlan,
+  type TravelPlanPricingPreview,
 } from "@/services/travel-plans";
 import { respondToCounterOffer } from "@/services/parcel-matches";
 import { extractListItems, extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { canEditTrip, canCancelOrDeleteTrip, isTripPast } from "@/lib/trip-status";
 import { RESPONDABLE_STATUSES, effectiveStatus, getRequestStatusLabel } from "@/lib/parcel-status";
-import { avatarTint, initials } from "@/lib/home-constants";
+import { formatCategory } from "@/lib/format-category";
 
 const modeLabel = (mode?: string) => ({ by_flight: "Flight", by_train: "Train", by_road: "Road" }[mode || ""] || "Travel");
 const formatDateTime = (value?: string) => {
@@ -40,6 +43,7 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
   const [actionLoading, setActionLoading] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pricingPreview, setPricingPreview] = useState<TravelPlanPricingPreview | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +58,13 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
             const embedded = details.requesters || details.requests || [];
             const loaded = matchesResult.status === "fulfilled" ? extractListItems<ParcelMatch>(matchesResult.value as never) : [];
             setRequests(loaded.length ? loaded : embedded);
+            if (details.pricePerPackage) {
+              previewTripPricing(details.pricePerPackage)
+                .then((preview) => {
+                  if (active) setPricingPreview(preview);
+                })
+                .catch(() => {});
+            }
           }
         } else {
           setError("We could not load this trip.");
@@ -131,7 +142,7 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
     setTogglingAccepting(true);
     const next = !acceptingNewRequests;
     try {
-      await updateTravelPlan(plan.id, { ...plan, acceptingNewRequests: next, notifySenders: false });
+      await updateTravelPlan(plan.id, { ...plan, pricePerPackage: plan.pricePerPackage ?? 0, acceptingNewRequests: next, notifySenders: false });
       setAcceptingNewRequests(next);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not update this trip.");
@@ -196,7 +207,29 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
             {plan.maxWeightKg && <p>Up to {plan.maxWeightKg} kg</p>}
             {plan.pricePerPackage && <p>₹{plan.pricePerPackage} / package</p>}
           </div>
+          {pricingPreview && (
+            <div className="mt-4 inline-block rounded-xl border border-white/20 bg-white/10 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.08em] text-[#c5d4ce]">You take home</p>
+              <p className="mt-0.5 text-lg font-semibold text-white">₹{pricingPreview.travelerPayoutAmount}</p>
+              <p className="mt-0.5 text-xs text-[#c5d4ce]">per package, after platform fee</p>
+            </div>
+          )}
         </section>
+
+        {(past || status === "completed" || status === "cancelled") && (
+          <Link
+            href={`/plans/new?repeatFrom=${plan.id}`}
+            className="mt-6 flex items-start gap-3 rounded-xl border border-[#bbd7f0] bg-[#e6f1fb] p-4 hover:border-[#0c447c]"
+          >
+            <span className="mt-0.5 text-lg">↻</span>
+            <span>
+              <span className="block text-sm font-semibold text-[#0c447c]">Run this route often?</span>
+              <span className="mt-0.5 block text-xs leading-5 text-[#4a6a8a]">
+                Repeat this trip to post it again with the same route, mode and price — just pick a new date.
+              </span>
+            </span>
+          </Link>
+        )}
 
         {error && <p role="alert" className="mt-6 rounded-xl border border-[#e85b43]/30 bg-[#fff0eb] px-4 py-3 text-sm text-[#b33e2c]">{error}</p>}
 
@@ -313,19 +346,14 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
                 <>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
-                      <span
-                        className="grid size-10 shrink-0 place-items-center rounded-full text-xs font-bold"
-                        style={{ backgroundColor: avatarTint(senderName).bg, color: avatarTint(senderName).fg }}
-                      >
-                        {initials(senderName)}
-                      </span>
+                      <Avatar userId={request.senderUserId} name={senderName} className="size-10 text-xs" />
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-[#183b3a]">{senderName}</p>
-                        <p className="truncate text-sm text-[#62645f]">{request.parcelDescription || request.parcelCategory || "Parcel request"}</p>
+                        <p className="truncate text-sm text-[#62645f]">{request.parcelDescription || formatCategory(request.parcelCategory) || "Parcel request"}</p>
                       </div>
                     </div>
                     <p className="shrink-0 text-sm font-semibold text-[#285c59]">
-                      {request.agreedPrice ? `₹${request.agreedPrice}` : request.baseAmount ? `₹${request.baseAmount}` : "Offer pending"}
+                      {request.travelerDisplayAmount ? `₹${request.travelerDisplayAmount}` : "Offer pending"}
                     </p>
                   </div>
                   {respondable ? (

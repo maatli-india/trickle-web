@@ -7,8 +7,8 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { cancelTravelPlanWithPolicy, getTravelPlanById, listParcelMatchesForPlan } from "@/services/travel-plans";
 import { extractListItems, extractOneItem, type ParcelMatch, type TravelPlan } from "@/types/travel";
 import { isCollectedRequest } from "@/lib/trip-status";
+import { formatCategory } from "@/lib/format-category";
 
-const getPrice = (request: ParcelMatch) => Number(request.agreedPrice || request.baseAmount || request.pricing?.baseAmount || 0);
 const getName = (request: ParcelMatch) => request.senderName || "Sender";
 
 export default function CancelTripPage({ params }: { params: Promise<{ id: string }> }) {
@@ -38,7 +38,6 @@ export default function CancelTripPage({ params }: { params: Promise<{ id: strin
 
   const collected = useMemo(() => requests.filter(isCollectedRequest), [requests]);
   const notCollected = useMemo(() => requests.filter((request) => !isCollectedRequest(request)), [requests]);
-  const totalRefund = requests.reduce((sum, request) => sum + getPrice(request), 0);
 
   const submit = async () => {
     setAttempted(true);
@@ -72,7 +71,7 @@ export default function CancelTripPage({ params }: { params: Promise<{ id: strin
           <div className="border-l-2 border-[#285c59] bg-[#e5f0eb] p-6">
             <h1 className="text-2xl font-semibold text-[#183b3a]">All senders notified</h1>
             <p className="mt-3 text-sm leading-6 text-[#62645f]">
-              All {requests.length} sender{requests.length === 1 ? " is" : "s are"} being refunded ₹{totalRefund} total — each refund&apos;s exact status is visible on that request&apos;s details page.{" "}
+              All {requests.length} sender{requests.length === 1 ? " is" : "s are"} being refunded in full — each refund&apos;s exact status is visible on that request&apos;s details page.{" "}
               {collected.length ? "Support will contact you within 2 hours about returning the collected packages." : "This trip is removed from your schedule."}
             </p>
             <Link href="/plans" className="mt-6 inline-block rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white">
@@ -106,7 +105,7 @@ export default function CancelTripPage({ params }: { params: Promise<{ id: strin
           <>
             <h1 className="mt-6 text-3xl font-semibold text-[#183b3a]">Cancel this trip?</h1>
             <p className="mt-3 text-sm leading-6 text-[#62645f]">
-              {requests.length} sender{requests.length !== 1 ? "s" : ""} will be refunded ₹{totalRefund} in full and notified right away.
+              {requests.length} sender{requests.length !== 1 ? "s" : ""} will be refunded in full and notified right away.
             </p>
           </>
         )}
@@ -119,9 +118,9 @@ export default function CancelTripPage({ params }: { params: Promise<{ id: strin
                 <div key={request.id} className="flex items-center justify-between gap-3 border border-[#f3d3cc] bg-[#faece7] p-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-[#183b3a]">{getName(request)}</p>
-                    <p className="truncate text-xs text-[#62645f]">{request.parcelDescription || request.parcelCategory || "Parcel"}</p>
+                    <p className="truncate text-xs text-[#62645f]">{request.parcelDescription || formatCategory(request.parcelCategory) || "Parcel"}</p>
                   </div>
-                  <span className="shrink-0 text-xs font-semibold text-[#b33e2c]">₹{getPrice(request)} refund</span>
+                  <span className="shrink-0 text-xs font-semibold text-[#b33e2c]">Full refund</span>
                 </div>
               ))}
             </div>
@@ -135,9 +134,9 @@ export default function CancelTripPage({ params }: { params: Promise<{ id: strin
                 <div key={request.id} className="flex items-center justify-between gap-3 border border-[#ded8ce] bg-[#fbfaf7] p-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-[#183b3a]">{getName(request)}</p>
-                    <p className="truncate text-xs text-[#62645f]">{request.parcelDescription || request.parcelCategory || "Parcel"}</p>
+                    <p className="truncate text-xs text-[#62645f]">{request.parcelDescription || formatCategory(request.parcelCategory) || "Parcel"}</p>
                   </div>
-                  <span className="shrink-0 rounded-full bg-[#e5f0eb] px-2 py-1 text-xs font-semibold text-[#285c59]">₹{getPrice(request)} refund</span>
+                  <span className="shrink-0 rounded-full bg-[#e5f0eb] px-2 py-1 text-xs font-semibold text-[#285c59]">Full refund</span>
                 </div>
               ))}
             </div>
@@ -164,12 +163,22 @@ export default function CancelTripPage({ params }: { params: Promise<{ id: strin
             {attempted && !understood && <p className="mt-1 text-xs text-[#b33e2c]">Please confirm you understand before continuing.</p>}
           </>
         ) : (
-          <div className="mt-6 flex gap-3 border border-[#b7e4d4] bg-[#e1f5ee] p-4 text-sm text-[#085041]">
-            Every sender gets a full refund. This cancellation will be recorded against your reliability score.
-          </div>
+          <>
+            <div className="mt-6 flex gap-3 border border-[#b7e4d4] bg-[#e1f5ee] p-4 text-sm text-[#085041]">
+              Every sender gets a full refund. This cancellation will be recorded against your reliability score.
+            </div>
+            <div className="mt-3 flex gap-3 border border-[#fbe2b4] bg-[#fff6e8] p-4 text-xs leading-5 text-[#7a4e05]">
+              Cancelling trips isn&apos;t something we encourage — it leaves senders without a traveller at short
+              notice. Doing this often can lower your reliability badge and affect how your account is reviewed.
+            </div>
+          </>
         )}
 
         {error && <p role="alert" className="mt-6 rounded-xl border border-[#e85b43]/30 bg-[#fff0eb] px-4 py-3 text-sm text-[#b33e2c]">{error}</p>}
+
+        <Link href="/cancellation-policy" className="mt-4 inline-block text-xs font-semibold text-[#62645f] underline hover:text-[#1b1d1c]">
+          Cancellation & refund policy
+        </Link>
 
         <button
           type="button"

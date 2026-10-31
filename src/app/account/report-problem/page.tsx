@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AccountPage } from "@/components/account/account-page";
 import { createReport } from "@/services/reports";
 
@@ -10,16 +11,41 @@ const CATEGORIES = [
   { value: "payment", label: "Payment issue" },
   { value: "delivery", label: "Delivery problem" },
   { value: "behaviour", label: "User behaviour" },
+  { value: "demanded_money_outside_app", label: "Asked for money outside the app" },
+  { value: "traveler_cancelled_after_confirm", label: "Traveler cancelled after confirming" },
   { value: "other", label: "Something else" },
 ];
 
+// useSearchParams() opts the page out of static rendering unless it's
+// wrapped in its own Suspense boundary — next build's prerender step fails
+// outright without this.
 export default function ReportProblemPage() {
-  const [category, setCategory] = useState(CATEGORIES[0].value);
-  const [description, setDescription] = useState("");
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#f6f2eb]" />}>
+      <ReportProblemContent />
+    </Suspense>
+  );
+}
+
+function ReportProblemContent() {
+  const searchParams = useSearchParams();
+  // Deep-link prefill (e.g. requests/[id]'s "Report this") — read once as
+  // each field's initial state so the category/description stay fully
+  // editable afterward, without needing an effect to set them post-mount.
+  const [category, setCategory] = useState(() => {
+    const queryCategory = searchParams.get("category");
+    return queryCategory && CATEGORIES.some((item) => item.value === queryCategory) ? queryCategory : CATEGORIES[0].value;
+  });
+  const [description, setDescription] = useState(() => searchParams.get("description") || "");
   const [urgent, setUrgent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  // Carried through from the same deep link so the submitted report is
+  // tied back to the request/trip/user it was filed from — never shown as
+  // its own field, just forwarded on submit.
+  const [reportedType] = useState(() => searchParams.get("reportedType") || "");
+  const [reportedId] = useState(() => searchParams.get("reportedId") || "");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -27,7 +53,13 @@ export default function ReportProblemPage() {
     setMessage("");
     setError("");
     try {
-      await createReport({ category, description, urgent });
+      await createReport({
+        category,
+        description,
+        urgent,
+        ...(reportedType ? { reportedType } : {}),
+        ...(reportedId ? { reportedId } : {}),
+      });
       setMessage("Your report has been sent to our support team. We will follow up if we need more details.");
       setDescription("");
       setUrgent(false);

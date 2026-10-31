@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Avatar } from "@/components/ui/avatar";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { listMyTravelPlans, listParcelMatchesForPlan } from "@/services/travel-plans";
@@ -155,7 +156,19 @@ export default function PlansPage() {
                   <span>
                     {modeLabel(plan.travelMode)} · {formatDateTime(plan.departureDate)}
                   </span>
-                  <span>
+                  <span className="flex items-center gap-2">
+                    {requests.length > 0 && (
+                      <span className="flex items-center">
+                        {requests.slice(0, 3).map((request, index) => (
+                          <Avatar
+                            key={request.id || request.senderUserId || index}
+                            userId={request.senderUserId}
+                            name={request.senderName}
+                            className={`size-6 border-2 border-[#fbfaf7] text-[9px] ${index ? "-ml-2" : ""}`}
+                          />
+                        ))}
+                      </span>
+                    )}
                     {requests.length} request{requests.length === 1 ? "" : "s"}
                     {needsResponse > 0 && <span className="ml-2 rounded-full bg-[#fff0eb] px-2 py-0.5 text-xs font-semibold text-[#e85b43]">{needsResponse} need response</span>}
                   </span>
