@@ -25,6 +25,7 @@ import {
   submitMatchRating,
   type PaymentOrder,
 } from "@/services/parcel-matches";
+import { initiateMaskedCall } from "@/services/call";
 import { redirectToPayUHostedCheckout } from "@/lib/payu";
 import { getTravelPlanById } from "@/services/travel-plans";
 import { getUserProfile, type UserProfile } from "@/services/users";
@@ -220,13 +221,29 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
   const payableAmount = (isSender && match.senderPayableAmount) || price;
   const packageCount = match.packageCount && match.packageCount > 0 ? match.packageCount : 1;
   const counterpart = isSender ? match.travelerName || "Traveller" : match.senderName || "Sender";
-  const counterpartPhone = String(
-    (isSender ? match.travelerPhone : match.senderPhone) ||
-      (isSender
-        ? (match.traveler as { phone?: string } | undefined)?.phone
-        : (match.sender as { phone?: string } | undefined)?.phone) ||
-      "",
-  );
+  const offerHistory = match.offerHistory || [];
+  const originalOffer = offerHistory.find(
+    (offer) =>
+      offer.proposedByUserId === match.senderUserId ||
+      offer.proposedByUserID === match.senderUserId ||
+      offer.proposedBy === "sender",
+  ) || offerHistory[0];
+  const latestOffer = offerHistory[offerHistory.length - 1];
+  const hasCounterOffer = offerHistory.length > 1 && latestOffer?.baseAmount != null;
+  const canRespondToCounterOffer =
+    isSender && hasCounterOffer && latestOffer?.status === "pending";
+  const originalOfferAmount = originalOffer?.baseAmount ?? match.baseAmount ?? 0;
+  const counterOfferAmount = latestOffer?.baseAmount ?? 0;
+  const counterOfferFrom =
+    latestOffer?.proposedByUserId === match.senderUserId ||
+    latestOffer?.proposedByUserID === match.senderUserId ||
+    latestOffer?.proposedBy === "sender"
+      ? match.senderName || "Sender"
+      : match.travelerName || "Traveller";
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
+  const [callBusy, setCallBusy] = useState(false);
+  const [callError, setCallError] = useState<string | null>(null);
+  const [phoneCopied, setPhoneCopied] = useState(false);
   const canCancel = CANCELLABLE_STATUSES.has(status);
   const isPendingLike = ["pending", "negotiating", "countered", "searching"].includes(status);
   const isPayGate = ["accepted", "accepted_awaiting_payment", "awaiting_payment", "payment_initiated"].includes(status);
@@ -466,15 +483,55 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
                   >
                     <MessageCircle size={16} />
                   </Link>
-                  <a
-                    href={counterpartPhone ? `tel:${counterpartPhone}` : undefined}
-                    aria-disabled={!counterpartPhone}
-                    title={counterpartPhone ? `Call ${counterpart}` : "Phone number unavailable"}
-                    aria-label={counterpartPhone ? `Call ${counterpart}` : "Phone number unavailable"}
-                    className={`grid size-9 place-items-center rounded-full bg-[#0f6e56] text-white transition hover:bg-[#285c59] ${!counterpartPhone ? "pointer-events-none opacity-50" : ""}`}
-                  >
-                    <Phone size={15} />
-                  </a>
+                  {maskedPhone ? (
+                    <span
+                      className="group relative flex items-center gap-1.5 rounded-full border border-white/30 px-3 py-1 text-sm font-medium text-white"
+                      title="Masked number (tap to copy)"
+                    >
+                      <Phone size={13} className="shrink-0 text-[#c5d4ce]" />
+                      <span>{maskedPhone}</span>
+                      <button
+                        type="button"
+                        className="ml-1 opacity-0 transition group-hover:opacity-100"
+                        aria-label="Copy phone number"
+                        onClick={() => {
+                          navigator.clipboard.writeText(maskedPhone).then(() => {
+                            setPhoneCopied(true);
+                            setTimeout(() => setPhoneCopied(false), 2000);
+                          });
+                        }}
+                      >
+                        {phoneCopied ? <Check size={13} className="text-[#e7b65c]" /> : <Copy size={13} className="text-[#c5d4ce] hover:text-[#e7b65c]" />}
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={callBusy}
+                      title={callError || `Call ${counterpart}`}
+                      aria-label={callError || `Call ${counterpart}`}
+                      className={`grid size-9 place-items-center rounded-full bg-[#0f6e56] text-white transition hover:bg-[#285c59] ${callBusy ? "animate-pulse" : ""}`}
+                      onClick={async () => {
+                        setCallBusy(true);
+                        setCallError(null);
+                        try {
+                          const response = await initiateMaskedCall(id);
+                          if (response?.phone) {
+                            setMaskedPhone(response.phone);
+                          } else {
+                            setCallError("Calling service did not return a number.");
+                          }
+                        } catch (err: unknown) {
+                          const msg = (err as Error)?.message || "";
+                          setCallError(/not.?allowed/i.test(msg) ? "Calling unavailable for this status" : "Could not start call");
+                        } finally {
+                          setCallBusy(false);
+                        }
+                      }}
+                    >
+                      <Phone size={15} />
+                    </button>
+                  )}
                 </>
               )}
               {canDeleteFromHistory && (

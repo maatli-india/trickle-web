@@ -113,6 +113,7 @@ export type PaymentOrder = {
   email: string;
   firstName: string;
   phone: string;
+  udf5?: string;
 };
 
 export const createPaymentOrder = (matchId: string, client: "web" | "app" = "web") =>
