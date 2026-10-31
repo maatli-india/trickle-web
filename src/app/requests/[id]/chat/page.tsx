@@ -3,11 +3,12 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Image as ImageIcon, Package, Phone, Send, ShieldCheck, Star } from "lucide-react";
+import { ArrowLeft, Check, Copy, Image as ImageIcon, Package, Phone, Send, ShieldCheck, Star } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { extractOneItem, type ParcelMatch } from "@/types/travel";
 import { getParcelMatch } from "@/services/parcel-matches";
+import { initiateMaskedCall } from "@/services/call";
 import { getChatMessages, getChatShortToken, type ChatMessage } from "@/services/chat";
 import { apiRequest } from "@/services/api-client";
 import { siteConfig } from "@/lib/config";
@@ -109,6 +110,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const parcelLabel = match?.parcelDescription || match?.parcelCategory || "Parcel";
   const routeLabel = match?.from?.address && match?.to?.address ? `${match.from.address} -> ${match.to.address}` : "";
   const myBubbleColor = isSender ? "#101828" : "#0F6E56";
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
+  const [callBusy, setCallBusy] = useState(false);
+  const [phoneCopied, setPhoneCopied] = useState(false);
 
   const sendMessage = () => {
     const text = draft.trim();
@@ -134,7 +138,19 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
               <div className="flex items-center gap-1.5"><h1 className="truncate font-[Sora,sans-serif] text-lg font-bold text-[#1B2230]">{counterpart}</h1><ShieldCheck size={14} color="#0F6E56" /></div>
               <div className="mt-1 flex items-center gap-1.5 text-xs text-[#8991A3]">{!isSender && <Star size={10} color="#F5A623" fill="#F5A623" />}{isSender ? "Delivering your package" : "Sender"}</div>
             </div>
-            <a href={isSender ? `tel:${match.travelerPhone || ""}` : `tel:${match.senderPhone || ""}`} aria-label={`Call ${counterpart}`} className="grid size-10 shrink-0 place-items-center rounded-full bg-[#0F6E56] text-white"><Phone size={16} /></a>
+            {maskedPhone ? (
+              <span className="group relative flex items-center gap-1.5 rounded-full border border-[#E4E8F0] px-3 py-1.5 text-sm font-medium text-[#1B2230]" title="Masked number (tap to copy)">
+                <Phone size={13} className="shrink-0 text-[#8991A3]" />
+                <span>{maskedPhone}</span>
+                <button type="button" className="ml-1 opacity-0 transition group-hover:opacity-100" aria-label="Copy phone number" onClick={() => { navigator.clipboard.writeText(maskedPhone).then(() => { setPhoneCopied(true); setTimeout(() => setPhoneCopied(false), 2000); }); }}>
+                  {phoneCopied ? <Check size={13} className="text-[#0F6E56]" /> : <Copy size={13} className="text-[#8991A3] hover:text-[#0F6E56]" />}
+                </button>
+              </span>
+            ) : (
+              <button type="button" disabled={callBusy} aria-label={`Call ${counterpart}`} className={`grid size-10 shrink-0 place-items-center rounded-full bg-[#0F6E56] text-white ${callBusy ? "animate-pulse" : ""}`} onClick={async () => { setCallBusy(true); try { const response = await initiateMaskedCall(id); if (response?.phone) setMaskedPhone(response.phone); } catch { /* silent — button stays enabled for retry */ } finally { setCallBusy(false); } }}>
+                <Phone size={16} />
+              </button>
+            )}
           </div>
           <div className="mx-5 mt-4 flex items-center gap-2 rounded-xl bg-[#EEF1F6] px-4 py-3 text-sm font-semibold text-[#5A6478] sm:mx-7"><Package size={14} color="#8991A3" /><span className="truncate">{parcelLabel}{routeLabel ? ` · ${routeLabel}` : ""}{!isSender && match.agreedPrice ? ` · You will earn ₹${match.agreedPrice}` : ""}</span></div>
           <div className="flex-1 overflow-y-auto px-5 py-6 sm:px-7">
