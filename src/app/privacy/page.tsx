@@ -60,8 +60,8 @@ export default function PrivacyPolicyPage() {
         <p>We share information only as needed to provide the service, protect users, or meet legal obligations. Depending on the feature, recipients may include:</p>
         <LegalList>
           <li>Other Trickle users involved in the same parcel, travel plan, match, or conversation. We show only information needed for coordination and safety.</li>
-          <li>Service providers for hosting, databases, file storage, email, SMS, push notifications, maps and address search, analytics or crash reporting, and customer support.</li>
-          <li>Razorpay or another approved payment provider for physical delivery payments, refunds, and traveler payouts.</li>
+          <li>Service providers for hosting, databases, file storage, email, SMS, push notifications, maps and address search, and customer support.</li>
+          <li>PayU or another approved payment provider for physical delivery payments, refunds, and traveler payouts.</li>
           <li>Professional advisers, insurers, authorities, or law enforcement when necessary for a dispute, safety incident, fraud investigation, legal claim, or legal obligation.</li>
           <li>A successor entity if Trickle is involved in a merger, acquisition, financing, or asset transfer, subject to appropriate confidentiality protections.</li>
         </LegalList>
