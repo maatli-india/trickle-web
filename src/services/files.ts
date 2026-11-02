@@ -111,18 +111,37 @@ export const fetchChatFileUrl = async (chatId: string, fileId: string): Promise<
   }
 };
 
+const AVATAR_CACHE_PREFIX = "trickle.web.avatar.";
+
 // GET /users/{userId}/profile-pic-url is public but requires X-Device-ID
 // and redirects to the real image — a plain <img src> can't set that
 // header, and browser fetch() can't read a redirect's Location, so this
 // goes through our own /api/avatar/[userId] route, which resolves the
 // redirect server-side and hands back the final URL as JSON.
+//
+// The result is cached in sessionStorage so navigating between tabs
+// doesn't re-fetch. Call invalidateAvatarCache after upload/delete.
 export const fetchAvatarUrl = async (userId: string): Promise<string | null> => {
   if (typeof window === "undefined" || !userId) return null;
+  const cacheKey = `${AVATAR_CACHE_PREFIX}${userId}`;
+  const cached = sessionStorage.getItem(cacheKey);
+  if (cached) return cached === "none" ? null : cached;
   try {
     const result = await apiRequest<{ url?: string }>(`/avatar/${encodeURIComponent(userId)}`);
-    return result?.url || null;
+    const url = result?.url || null;
+    sessionStorage.setItem(cacheKey, url || "none");
+    return url;
   } catch {
     return null;
+  }
+};
+
+export const invalidateAvatarCache = (userId?: string) => {
+  if (typeof window === "undefined") return;
+  if (userId) {
+    sessionStorage.removeItem(`${AVATAR_CACHE_PREFIX}${userId}`);
+  } else {
+    Object.keys(sessionStorage).filter((k) => k.startsWith(AVATAR_CACHE_PREFIX)).forEach((k) => sessionStorage.removeItem(k));
   }
 };
 
