@@ -12,16 +12,18 @@ export const CATEGORIES: { key: string; label: string }[] = [
 
 export const MAX_PHOTOS = 5;
 
-type HandoverOption = { key: string; label: string; sub: string };
+// `key` is the UI selection key, `value` is the backend API enum sent as
+// pickupOption/deliveryOption (e.g. "door_pickup", "public_place").
+export type HandoverOption = { key: string; value: string; label: string; sub: string };
 
-export const PICKUP_HANDOVER_OPTIONS: Record<string, HandoverOption> = {
+export const PICKUP_HANDOVER_OPTIONS: Record<string, Omit<HandoverOption, "value">> = {
   door_pickup: { key: "home", label: "Traveller picks up from you", sub: "Traveller collects the parcel from your address" },
   public_place: { key: "point", label: "Meet the traveller at a common point", sub: "You hand over the parcel at an agreed station or landmark" },
   station_airport: { key: "point", label: "Meet the traveller at a common point", sub: "You hand over the parcel at an agreed station, airport, or landmark" },
   flexible: { key: "drop", label: "You drop it to the traveller", sub: "You take the parcel to an agreed handover place" },
 };
 
-export const DELIVERY_HANDOVER_OPTIONS: Record<string, HandoverOption> = {
+export const DELIVERY_HANDOVER_OPTIONS: Record<string, Omit<HandoverOption, "value">> = {
   public_place: { key: "point", label: "Receiver meets the traveller at a common point", sub: "Receiver collects the parcel at an agreed station or landmark" },
   station_airport: { key: "point", label: "Receiver meets the traveller at a common point", sub: "Receiver collects the parcel at an agreed station, airport, or landmark" },
   flexible: { key: "pickup", label: "Receiver picks up from the traveller", sub: "Receiver collects the parcel from the traveller at an agreed place" },
@@ -41,9 +43,11 @@ export const getHandoverOptions = (
   trip: { pickupHandovers?: string[]; pickupHandover?: string; deliveryHandovers?: string[]; deliveryHandover?: string },
   pluralKey: "pickupHandovers" | "deliveryHandovers",
   singularKey: "pickupHandover" | "deliveryHandover",
-  definitions: Record<string, HandoverOption>,
+  definitions: Record<string, Omit<HandoverOption, "value">>,
 ): HandoverOption[] => {
-  const options = [...new Set(getHandoverValues(trip, pluralKey, singularKey))].map((value) => definitions[value]).filter(Boolean) as HandoverOption[];
+  const options = [...new Set(getHandoverValues(trip, pluralKey, singularKey))]
+    .map((value) => (definitions[value] ? { ...definitions[value], value } : null))
+    .filter(Boolean) as HandoverOption[];
   return options.filter((option, index) => options.findIndex((item) => item.key === option.key) === index);
 };
 

@@ -6,7 +6,7 @@ import { AccountPage } from "@/components/account/account-page";
 import { Avatar } from "@/components/ui/avatar";
 import { apiRequest } from "@/services/api-client";
 import { buildDeviceDetails, getWebProfile, getWebUserId } from "@/services/auth";
-import { deleteMyProfilePic, uploadProfilePic, waitForAvatarUrl } from "@/services/files";
+import { deleteMyProfilePic, invalidateAvatarCache, uploadProfilePic, waitForAvatarUrl } from "@/services/files";
 import { startDigilockerVerification } from "@/services/digilocker";
 
 type NotificationPreferences = { pushEnabled?: boolean; emailUpdatesEnabled?: boolean };
@@ -55,7 +55,10 @@ export default function AccountSettingsPage() {
       const status = await uploadProfilePic(file);
       if (status.status !== "READY") throw new Error("Your photo could not be processed. Please try a different image.");
       setPhotoStatus("Finishing up...");
-      if (userId) await waitForAvatarUrl(userId);
+      if (userId) {
+        invalidateAvatarCache(userId);
+        await waitForAvatarUrl(userId);
+      }
       setAvatarRefreshKey((key) => key + 1);
     } catch (requestError) {
       setPhotoError(requestError instanceof Error ? requestError.message : "Could not upload your photo.");
@@ -70,6 +73,7 @@ export default function AccountSettingsPage() {
     setPhotoError("");
     try {
       await deleteMyProfilePic();
+      if (userId) invalidateAvatarCache(userId);
       setAvatarRefreshKey((key) => key + 1);
     } catch (requestError) {
       const status = (requestError as { status?: number })?.status;

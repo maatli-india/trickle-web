@@ -27,6 +27,9 @@ export function redirectToPayUHostedCheckout(order: PaymentOrder, hash: string) 
     pg: "",
   };
 
+  // Service tag; part of the signed hash and echoed by PayU so only this env processes the webhook.
+  if (order.udf5) fields.udf5 = order.udf5;
+
   const form = document.createElement("form");
   form.method = "POST";
   form.action = order.checkoutUrl;
