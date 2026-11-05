@@ -1,0 +1,356 @@
+# UI service — Build & Deploy to Netlify via CLI (manual only; no Netlify↔GitHub link, no S3/Docker).
+#
+# `release` validates inputs and resolves branch/sha/message once. `deploy` runs per selected env
+# (matrix → GitHub Environment dev/qa/prod holds NETLIFY_SITE_ID + API host), one env at a time.
+# Next.js SSR: `netlify deploy` runs the Netlify build itself so the Next.js adapter emits the
+# server functions — a bare `next build` + upload would ship a broken site.
+#
+# Keys + rollback: see .github/DEPLOY-NETLIFY-CONFIG.md
+name: UI service — Netlify
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        required: true
+        type: choice
+        options: [deploy, build]
+      dev:
+        description: "DEV"
+        type: boolean
+        default: false
+      qa:
+        description: "QA"
+        type: boolean
+        default: false
+      prod:
+        description: "PROD (alone, deploy only)"
+        type: boolean
+        default: false
+      build_tag:
+        description: "Empty = selected branch · git SHA (7–40 hex) = that commit · Netlify deploy ID (24 hex) = rollback, no build"
+        type: string
+        required: false
+        default: ""
+      message:
+        description: "Custom deploy message (optional — defaults to commit subject, or PR title on merge commits)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  NETLIFY_CLI_VERSION: "27"
+  NETLIFY_PUBLISH_DIR: ${{ vars.NETLIFY_PUBLISH_DIR || '.next' }}
+  # Node.js LTS for the runner build; Netlify Functions then run on the same major (24 = newest Lambda runtime).
+  NODE_VERSION: ${{ vars.NODE_VERSION || '24' }}
+  SERVICE_NAME: ${{ vars.SERVICE_NAME || 'Trickle User portal' }}
+
+jobs:
+  release:
+    name: Validate & metadata
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.meta.outputs.branch }}
+      envs: ${{ steps.validate.outputs.envs }}
+      message: ${{ steps.meta.outputs.message }}
+      mode: ${{ steps.validate.outputs.mode }}
+      sha: ${{ steps.meta.outputs.sha }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      tag: ${{ steps.validate.outputs.tag }}
+    steps:
+      - id: validate
+        name: Validate inputs
+        env:
+          ACTION: ${{ inputs.action }}
+          BUILD_TAG: ${{ inputs.build_tag }}
+          DEV: ${{ inputs.dev }}
+          PROD: ${{ inputs.prod }}
+          QA: ${{ inputs.qa }}
+        run: |
+          set -euo pipefail
+          ENVS=()
+          if [ "$DEV" = true ]; then ENVS+=(dev); fi
+          if [ "$QA" = true ]; then ENVS+=(qa); fi
+          if [ "$PROD" = true ]; then ENVS+=(prod); fi
+          # Build too: the API host is baked into the bundle, so each build targets one env.
+          if [ "${#ENVS[@]}" -eq 0 ]; then
+            echo "::error:: No environment selected for ${ACTION}"
+            exit 1
+          fi
+          # PROD always builds and deploys in its own run: never build-only, never batched with dev/qa.
+          if [ "$PROD" = true ] && [ "${#ENVS[@]}" -gt 1 ]; then
+            echo "::error:: PROD deploys alone — untick dev/qa"
+            exit 1
+          fi
+          if [ "$PROD" = true ] && [ "$ACTION" = build ]; then
+            echo "::error:: PROD has no build-only run — use action=deploy"
+            exit 1
+          fi
+
+          # Netlify deploy IDs are 24 hex chars; any other 7–40 hex string is treated as a git SHA.
+          TAG=$(printf '%s' "$BUILD_TAG" | tr -d '[:space:]' | tr 'A-F' 'a-f')
+          if [ -z "$TAG" ]; then
+            MODE=source
+          elif [[ "$TAG" =~ ^[0-9a-f]{24}$ ]]; then
+            MODE=restore
+          elif [[ "$TAG" =~ ^[0-9a-f]{7,40}$ ]]; then
+            MODE=sha
+          else
+            echo "::error:: build_tag '${BUILD_TAG}' is neither a Netlify deploy ID (24 hex) nor a git SHA (7–40 hex)"
+            exit 1
+          fi
+          if [ "$MODE" = restore ] && { [ "$ACTION" != deploy ] || [ "${#ENVS[@]}" -ne 1 ]; }; then
+            echo "::error:: Rollback by Netlify deploy ID needs action=deploy and exactly one env (deploy IDs are per site)"
+            exit 1
+          fi
+
+          {
+            echo "envs=$(printf '%s\n' "${ENVS[@]}" | jq -R . | jq -cs .)"
+            echo "mode=$MODE"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        if: steps.validate.outputs.mode != 'restore'
+        with:
+          # Full history only when a SHA must be resolved.
+          fetch-depth: ${{ steps.validate.outputs.mode == 'sha' && '0' || '1' }}
+
+      - id: meta
+        name: Resolve branch, sha and deploy message
+        env:
+          ACTION: ${{ inputs.action }}
+          BRANCH: ${{ github.ref_name }}
+          CUSTOM_MESSAGE: ${{ inputs.message }}
+          MODE: ${{ steps.validate.outputs.mode }}
+          TAG: ${{ steps.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SHA="$GITHUB_SHA"
+          if [ "$MODE" = sha ]; then
+            if ! SHA=$(git rev-parse --verify --quiet "${TAG}^{commit}"); then
+              echo "::error:: Commit ${TAG} not found (or ambiguous) in ${GITHUB_REPOSITORY}"
+              exit 1
+            fi
+          fi
+
+          MG="$CUSTOM_MESSAGE"
+          if [ -z "$MG" ] && [ "$MODE" = restore ]; then
+            MG="Rollback to Netlify deploy ${TAG}"
+          elif [ -z "$MG" ]; then
+            MG=$(git log -1 --pretty=%s "$SHA")
+            # GitHub merge commit: subject is "Merge pull request #N from …", body is the PR title.
+            if [[ "$MG" =~ ^Merge[[:space:]]pull[[:space:]]request ]]; then
+              BODY=$(git log -1 --pretty=%b "$SHA" | sed '/^[[:space:]]*$/d' | head -1)
+              if [ -n "$BODY" ]; then MG="$BODY"; fi
+            fi
+          fi
+          MG=$(printf '%s' "$MG" | tr '\n\r' '  ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-300)
+
+          {
+            echo "branch=$BRANCH"
+            echo "message=$MG"
+            echo "sha=$SHA"
+            echo "short_sha=${SHA:0:7}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${SERVICE_NAME} — ${ACTION} (${MODE})"
+            echo "- Branch: \`${BRANCH}\` @ \`${SHA:0:7}\`"
+            echo "- Message: ${MG}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: ${{ inputs.action == 'build' && 'Build' || 'Deploy' }} → ${{ matrix.env }}
+    needs: release
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.env }}
+    strategy:
+      # Only ticked envs run. dev+qa: dev first, qa skipped if dev fails. PROD always runs alone.
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        env: ${{ fromJSON(needs.release.outputs.envs) }}
+    concurrency:
+      group: netlify-${{ github.repository }}-${{ matrix.env }}
+      cancel-in-progress: false
+    env:
+      ACTION: ${{ inputs.action }}
+      ENV_NAME: ${{ matrix.env }}
+      MODE: ${{ needs.release.outputs.mode }}
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
+      NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+    steps:
+      - name: Check ${{ matrix.env }} config
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          if [ "$MODE" != restore ] && [ -z "$NEXT_PUBLIC_API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
+          if [ "$ACTION" = deploy ] && [ -z "$NETLIFY_SITE_ID" ]; then MISSING+=(NETLIFY_SITE_ID); fi
+          if [ "$ACTION" = deploy ] && [ -z "$NETLIFY_AUTH_TOKEN" ]; then MISSING+=("NETLIFY_AUTH_TOKEN (secret)"); fi
+          if [ "${#MISSING[@]}" -gt 0 ]; then
+            echo "::error:: GitHub Environment '${ENV_NAME}' is missing: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        if: env.MODE != 'restore'
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ env.MODE != 'restore' && 'npm' || '' }}
+
+      - name: Install dependencies
+        if: env.MODE != 'restore'
+        run: npm ci
+
+      - name: Build only (no Netlify)
+        if: inputs.action == 'build'
+        run: npm run build
+
+      - name: Install Netlify CLI
+        if: inputs.action == 'deploy'
+        run: npm install -g "netlify-cli@${NETLIFY_CLI_VERSION}"
+
+      - name: Netlify build & deploy (--prod) + smoke check
+        if: inputs.action == 'deploy' && env.MODE != 'restore'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          TITLE: ${{ needs.release.outputs.branch }}@${{ needs.release.outputs.short_sha }} ${{ needs.release.outputs.message }}
+        run: |
+          set -euo pipefail
+          SITE_DATA="{\"site_id\":\"${NETLIFY_SITE_ID}\"}"
+          PREV_ID=$(netlify api getSite --data "$SITE_DATA" | jq -r '.published_deploy.id // empty')
+          echo "PREV_ID=$PREV_ID" >> "$GITHUB_ENV"
+
+          # The title is parsed back on rollback — keep "<branch>@<sha> <message>".
+          netlify deploy --prod --context production --site "$NETLIFY_SITE_ID" --dir "$NETLIFY_PUBLISH_DIR" \
+            --message "$TITLE" --json | tee deploy.json
+
+          DEPLOY_ID=$(jq -r '.deploy_id // .id // empty' deploy.json)
+          DEPLOY_URL=$(jq -r '.deploy_url // .url // empty' deploy.json)
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "::error:: Netlify returned no deploy_id"
+            exit 1
+          fi
+          {
+            echo "DEPLOY_ID=$DEPLOY_ID"
+            echo "DEPLOY_URL=$DEPLOY_URL"
+            echo "SITE_URL=$(jq -r '.url // empty' deploy.json)"
+          } >> "$GITHUB_ENV"
+
+          # Same contract as the API health check: probe the new deploy, restore the previous one on failure.
+          echo "--- Smoke check ${DEPLOY_URL}/ (10 * 3s) ---"
+          for i in $(seq 1 10); do
+            CODE=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${DEPLOY_URL}/" || true)
+            if [ "$CODE" = 200 ]; then echo "  $i/10 OK"; exit 0; fi
+            echo "  $i/10 HTTP ${CODE}"; sleep 3
+          done
+          echo "::error:: Smoke check failed for ${DEPLOY_URL}"
+          if [ -n "$PREV_ID" ]; then
+            netlify api restoreSiteDeploy --data "{\"site_id\":\"${NETLIFY_SITE_ID}\",\"deploy_id\":\"${PREV_ID}\"}" >/dev/null
+            echo "ROLLED_BACK_TO=$PREV_ID" >> "$GITHUB_ENV"
+            echo "::error:: Restored previous deploy ${PREV_ID}"
+          fi
+          exit 1
+
+      - name: Rollback — restore Netlify deploy
+        if: inputs.action == 'deploy' && env.MODE == 'restore'
+        env:
+          DEPLOY_ID: ${{ needs.release.outputs.tag }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          DATA="{\"site_id\":\"${NETLIFY_SITE_ID}\",\"deploy_id\":\"${DEPLOY_ID}\"}"
+          # Deploy IDs are per site: an ID from another env's site is not found here.
+          if ! netlify api getSiteDeploy --data "$DATA" > target.json; then
+            echo "::error:: Deploy ${DEPLOY_ID} not found on the ${ENV_NAME} site"
+            exit 1
+          fi
+          STATE=$(jq -r '.state // empty' target.json)
+          if [ "$STATE" != ready ]; then
+            echo "::error:: Deploy ${DEPLOY_ID} is '${STATE}'; only 'ready' deploys can be restored"
+            exit 1
+          fi
+          PREV_ID=$(netlify api getSite --data "{\"site_id\":\"${NETLIFY_SITE_ID}\"}" | jq -r '.published_deploy.id // empty')
+          netlify api restoreSiteDeploy --data "$DATA" > restore.json
+
+          # Report the restored deploy's own branch/sha/message, not the selected branch's HEAD.
+          # This workflow titles deploys "<branch>@<sha> <message>"; Git-built deploys carry branch/commit_ref.
+          TITLE=$(jq -r '.title // empty' target.json | tr '\n\r' '  ')
+          if [[ "$TITLE" =~ ^([^[:space:]]+)@([0-9a-f]{7,40})([[:space:]](.*))?$ ]]; then
+            R_BRANCH=${BASH_REMATCH[1]} R_SHA=${BASH_REMATCH[2]} R_MSG=${BASH_REMATCH[4]}
+          else
+            R_BRANCH=$(jq -r '.branch // empty' target.json)
+            R_SHA=$(jq -r '.commit_ref // empty' target.json | cut -c1-7)
+            R_MSG=$TITLE
+          fi
+          {
+            echo "DEPLOY_ID=$DEPLOY_ID"
+            echo "DEPLOY_URL=$(jq -r '.deploy_ssl_url // .deploy_url // empty' restore.json)"
+            echo "PREV_ID=$PREV_ID"
+            echo "RESTORED_BRANCH=$R_BRANCH"
+            echo "RESTORED_MESSAGE=$R_MSG"
+            echo "RESTORED_SHA=$R_SHA"
+            echo "SITE_URL=$(jq -r '.ssl_url // .url // empty' restore.json)"
+          } >> "$GITHUB_ENV"
+
+      # curl instead of a third-party action: the bot token never leaves this step.
+      - name: Summary & Telegram (${{ matrix.env }})
+        if: always() && inputs.action == 'deploy'
+        continue-on-error: true
+        env:
+          ACTOR: ${{ github.actor }}
+          BRANCH: ${{ needs.release.outputs.branch }}
+          JOB_STATUS: ${{ job.status }}
+          MESSAGE: ${{ needs.release.outputs.message }}
+          SHORT_SHA: ${{ needs.release.outputs.short_sha }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -uo pipefail
+          if [ "$MODE" = restore ]; then
+            BRANCH=${RESTORED_BRANCH:-n/a}
+            SHORT_SHA=${RESTORED_SHA:-n/a}
+            MESSAGE=${RESTORED_MESSAGE:-$MESSAGE}
+          fi
+          # Backticks would break Telegram Markdown; free text goes inside code spans.
+          MG=${MESSAGE//\`/\'}
+          if [ "$JOB_STATUS" = success ] && [ "$MODE" = restore ]; then HEAD='⏪ *Rollback Successful*'
+          elif [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
+          elif [ -n "${ROLLED_BACK_TO:-}" ]; then HEAD='❌ *Deployment Failed / Rolled Back*'
+          else HEAD='❌ *Deployment Failed*'
+          fi
+
+          L=("$HEAD" ""
+            "🔧 *Service:*  \`${SERVICE_NAME}\`"
+            "🌍 *Environment:*  \`${ENV_NAME^^}\`"
+            "⚙️ *Action:*  \`$([ "$MODE" = restore ] && echo rollback || echo deploy)\`"
+            "👤 *By:*  \`${ACTOR}\`"
+            "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
+          L+=("🆔 *Netlify deploy ID:*  \`${DEPLOY_ID:-n/a}\`")
+          if [ -n "${DEPLOY_URL:-}" ]; then L+=("🔗 *Deploy URL:*  ${DEPLOY_URL}"); fi
+          if [ -n "${SITE_URL:-}" ]; then L+=("🌐 *Site:*  ${SITE_URL}"); fi
+          L+=("💬 *Message:*  \`${MG}\`")
+          if [ "$JOB_STATUS" = success ]; then
+            L+=("↩️ *Rollback:*  \`workflow_dispatch → build_tag=${DEPLOY_ID}\`")
+            if [ -n "${PREV_ID:-}" ]; then L+=("⏮ *Undo (previous):*  \`build_tag=${PREV_ID}\`"); fi
+          fi
+
+          printf '%s  \n' "${L[@]}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::warning:: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — skipped notify"
+            exit 0
+          fi
+          curl -sS --fail -o /dev/null "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=$(printf '%s\n' "${L[@]}")" \
+            -d parse_mode=Markdown -d disable_web_page_preview=true

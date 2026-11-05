@@ -31,7 +31,7 @@ const nextConfig: NextConfig = {
       fromEnv ||
       (process.env.NODE_ENV === "production"
         ? (() => {
-            throw new Error("NEXT_PUBLIC_API_BASE_URL is required in production (set on Netlify).");
+            throw new Error("NEXT_PUBLIC_API_BASE_URL is required in production (set it in the GitHub environment).");
           })()
         : "http://localhost:7003/trickle");
     return {

@@ -110,7 +110,10 @@ export async function apiRequest<T>(path: string, init?: RequestInit, canRefresh
       },
     });
   } catch (error) {
-    console.error(`[HTTP] ${method} ${path} — network request failed`, error);
+    // An abort is a superseded request (e.g. the user kept typing), not a network failure.
+    if ((error as Error).name !== "AbortError") {
+      console.error(`[HTTP] ${method} ${path} — network request failed`, error);
+    }
     throw error;
   }
 
