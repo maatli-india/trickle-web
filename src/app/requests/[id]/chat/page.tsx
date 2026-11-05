@@ -24,6 +24,7 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { extractOneItem, type ParcelMatch } from "@/types/travel";
 import { formatCategory } from "@/lib/format-category";
+import { formatLocalLocation, type LocalLocation } from "@/lib/local-location-search";
 import { getParcelMatch } from "@/services/parcel-matches";
 import { initiateMaskedCall } from "@/services/call";
 import { fetchChatFileUrl, uploadChatImage } from "@/services/files";
@@ -479,15 +480,12 @@ function ChatPageContent({ id }: { id: string }) {
     setPendingUploads((current) => current.filter((item) => item.localId !== localId));
   };
 
+  // Area-level label only; the pin itself carries the exact lat/lng.
   const resolveAddressForCoords = async (lat: number, lng: number): Promise<string> => {
-    try {
-      const response = await fetch(`/api/places/reverse-geocode?lat=${lat}&lng=${lng}`);
-      if (!response.ok) return "";
-      const data = (await response.json()) as { results?: Array<{ formatted_address?: string }> };
-      return data.results?.[0]?.formatted_address || "";
-    } catch {
-      return "";
-    }
+    const nearby = await apiRequest<{ items?: LocalLocation[] }>(
+      `/v1/locations/nearby?lat=${lat}&lng=${lng}&radiusKm=25&limit=1`,
+    ).catch(() => null);
+    return nearby?.items?.[0] ? formatLocalLocation(nearby.items[0]) : "";
   };
 
   const shareCurrentLocation = () => {

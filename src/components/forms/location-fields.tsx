@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatLocalLocation, searchLocalLocations } from "@/lib/local-location-search";
+import { apiRequest } from "@/services/api-client";
 
 export type LocationForm = { address: string; lat: string; lng: string };
 
@@ -10,20 +11,6 @@ export const emptyLocation = (): LocationForm => ({ address: "", lat: "", lng: "
 export const inputClass =
   "mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]";
 export const labelClass = "block text-sm font-semibold text-[#183b3a]";
-
-export const getAreaName = (result: {
-  address_components?: Array<{ long_name: string; types: string[] }>;
-  formatted_address?: string;
-}) => {
-  const components = result.address_components || [];
-  const area =
-    components.find((component) => component.types.includes("neighborhood")) ||
-    components.find((component) => component.types.includes("sublocality")) ||
-    components.find((component) => component.types.includes("locality"));
-  const city = components.find((component) => component.types.includes("locality"));
-  if (area && city && area.long_name !== city.long_name) return `${area.long_name}, ${city.long_name}`;
-  return area?.long_name || result.formatted_address || "Current location";
-};
 
 type AddressSuggestion = {
   place_id: string;
@@ -113,10 +100,15 @@ export function LocationFields({
             return;
           }
         }
-        const response = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(value.address)}`, {
-          signal: controller.signal,
-        });
-        if (response.ok) setSuggestions((await response.json()).predictions || []);
+        const places = await apiRequest<{ items?: Array<{ placeId: string; description: string; mainText?: string; secondaryText?: string }> }>(
+          `/v1/locations/autocomplete?q=${encodeURIComponent(value.address)}&source=web`,
+          { signal: controller.signal },
+        );
+        setSuggestions((places.items || []).map((place) => ({
+          place_id: place.placeId,
+          description: place.description,
+          structured_formatting: { main_text: place.mainText, secondary_text: place.secondaryText },
+        })));
       } catch (error) {
         if ((error as Error).name !== "AbortError") setSuggestions([]);
       } finally {
@@ -142,14 +134,14 @@ export function LocationFields({
       onChange({ address: suggestion.description, lat: suggestion.lat, lng: suggestion.lng });
       return;
     }
-    const response = await fetch(`/api/places/details?placeId=${encodeURIComponent(suggestion.place_id)}`);
-    if (!response.ok) return;
-    const result = await response.json();
-    const location = result.result?.geometry?.location;
-    if (location) {
-      const address = result.result.formatted_address || suggestion.description;
+    const place = await apiRequest<{ item?: { aliases?: string[]; lat: number; lng: number } }>(
+      `/v1/locations/resolve-place?placeId=${encodeURIComponent(suggestion.place_id)}&source=web`,
+    ).catch(() => null);
+    if (place?.item) {
+      // aliases[0] is Google's full formatted address.
+      const address = place.item.aliases?.[0] || suggestion.description;
       selectedAddressRef.current = address;
-      onChange({ address, lat: String(location.lat), lng: String(location.lng) });
+      onChange({ address, lat: String(place.item.lat), lng: String(place.item.lng) });
     }
   };
 
