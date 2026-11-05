@@ -250,8 +250,13 @@ jobs:
           # Same contract as the API health check: probe the new deploy, restore the previous one on failure.
           echo "--- Smoke check ${DEPLOY_URL}/ (10 * 3s) ---"
           for i in $(seq 1 10); do
-            CODE=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${DEPLOY_URL}/" || true)
+            CODE=$(curl -sSL -o smoke.html -w '%{http_code}' --max-time 20 "${DEPLOY_URL}/" || true)
             if [ "$CODE" = 200 ]; then echo "  $i/10 OK"; exit 0; fi
+            # Netlify's team-login gate, not the app; automation has no documented way past it.
+            if [ "$CODE" = 401 ] && grep -q 'edge-access' smoke.html 2>/dev/null; then
+              echo "::warning:: ${DEPLOY_URL} is behind Netlify team-login protection; smoke check skipped"
+              exit 0
+            fi
             echo "  $i/10 HTTP ${CODE}"; sleep 3
           done
           echo "::error:: Smoke check failed for ${DEPLOY_URL}"
