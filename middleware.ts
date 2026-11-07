@@ -11,11 +11,16 @@ import { NextRequest, NextResponse } from "next/server";
 // domain, and that domain can differ between PayU sandbox/production. An
 // incomplete form-action allowlist would silently break real payments,
 // which is worse than the (low) risk form-action mitigates here.
+//
+// worker-src is explicit because 'strict-dynamic' makes browsers ignore
+// 'self' in script-src, which worker-src would otherwise fall back to —
+// that would block the PWA service worker (public/sw.js).
 export function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const csp = `
     default-src 'self';
     script-src 'self' 'nonce-${nonce}' 'strict-dynamic';
+    worker-src 'self';
     style-src 'self' 'unsafe-inline';
     img-src 'self' data: https:;
     font-src 'self' data:;
@@ -40,7 +45,10 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     // Every page/route except static assets and image optimization files,
-    // which don't need (and shouldn't pay the cost of) a CSP header.
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+    // which don't need (and shouldn't pay the cost of) a CSP header. The PWA
+    // files are excluded too: sw.js gets its own headers in next.config.ts,
+    // and offline.html must load offline.js, which a nonce-based
+    // 'strict-dynamic' policy would block.
+    "/((?!_next/static|_next/image|favicon.ico|sw.js|offline.html|offline.js|manifest.webmanifest|icon-|apple-touch-icon).*)",
   ],
 };

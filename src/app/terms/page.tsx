@@ -11,7 +11,7 @@ export default function TermsPage() {
     <LegalPage
       eyebrow="Trickle terms"
       title="Terms of Service"
-      updated="5 August 2026"
+      updated="6 November 2026"
       intro="These terms explain how Trickle works, what senders and travelers agree to do, and how payments, handoffs, cancellations, safety reports, and disputes are handled."
       sections={[
         { href: "#overview", label: "Overview" },
@@ -19,6 +19,7 @@ export default function TermsPage() {
         { href: "#parcels", label: "Parcel rules" },
         { href: "#payments", label: "Payments" },
         { href: "#cancellations", label: "Disputes" },
+        { href: "#assurance", label: "Trickle Assurance" },
         { href: "#content", label: "Conduct" },
         { href: "#contact", label: "Contact" },
       ]}
@@ -49,7 +50,8 @@ export default function TermsPage() {
         <p><strong>Travelers must:</strong></p>
         <LegalList>
           <li>Post accurate route, date, timing, identity, and available-space information.</li>
-          <li>Inspect the parcel enough to identify obvious safety or policy concerns before accepting it.</li>
+          <li>Thoroughly inspect the parcel before accepting it, and refuse it if anything about its contents, packaging, weight, or the sender&rsquo;s description seems unsafe, prohibited, or misrepresented.</li>
+          <li>When traveling by flight, ensure the parcel is screened through the airport&rsquo;s available security scanning (e.g., X-ray/baggage screening) and any airline-required checks before carrying it, in addition to the traveler&rsquo;s own inspection.</li>
           <li>Keep an accepted parcel secure and complete the agreed handoffs.</li>
           <li>Notify the sender and Trickle promptly about delays, cancellation, loss, damage, or safety concerns.</li>
         </LegalList>
@@ -67,6 +69,7 @@ export default function TermsPage() {
           <li>Any item whose contents, value, weight, or dimensions are deliberately misrepresented.</li>
         </LegalList>
         <p>We may refuse, cancel, hold, report, or remove a parcel or match when we believe it violates these Terms, creates a safety risk, or may expose users or Trickle to legal or financial harm.</p>
+        <p>Trickle does not inspect, X-ray, or verify parcel contents and relies on the sender&rsquo;s accurate declaration. If a sender nonetheless includes an illegal, prohibited, or undeclared item in a parcel, the sender alone is responsible and liable for that item and any resulting consequences &mdash; not Trickle.</p>
       </LegalSection>
 
       <LegalSection id="identity" title="5. Identity and safety">
@@ -104,6 +107,8 @@ export default function TermsPage() {
       </LegalSection>
 
       <LegalSection id="reports" title="9. Reports, blocking, and moderation">
+        <p><strong>Trickle has zero tolerance for objectionable content and abusive users.</strong> Posting or sending content that is abusive, harassing, hateful, sexually explicit, threatening, or otherwise objectionable, or behaving abusively toward other users, is prohibited and may lead to immediate removal of the content and suspension or permanent termination of the account.</p>
+        <p>You can report a user, a request, a chat message, or an errand post from within the app: Report issue on any request, long-press a message and tap Report message, Report post on an errand, or Report from a user&rsquo;s profile or chat. You can also block any user from their profile, a request, a chat, or an errand post. Blocking immediately hides that user&rsquo;s profile, trips, and requests from you, ends chat between you, cancels any open request between you, and notifies the Trickle team so we can review their activity. We review reports and act on objectionable content within 24 hours, including removing the content and removing the user who provided it where appropriate.</p>
         <p>Use in-app support or reporting tools for abusive users, unsafe parcels, suspicious activity, or harmful messages. We may review relevant content and account information to investigate. We may not disclose investigation details where doing so would compromise safety, privacy, or legal obligations.</p>
         <p>Blocking or moderation may limit contact, but it cannot guarantee that a person will never encounter another person offline. Contact local emergency services for immediate danger.</p>
       </LegalSection>
@@ -115,19 +120,36 @@ export default function TermsPage() {
 
       <LegalSection id="liability" title="11. Responsibility and limits">
         <p>To the extent permitted by law, you use Trickle at your own risk and remain responsible for your decisions, parcel contents, conduct, and compliance with law. Trickle does not guarantee that a match will be available, a user will perform, a parcel will arrive on time, or a parcel will be undamaged.</p>
+        <p>Without limiting the above, and to make the allocation of responsibility clear:</p>
+        <LegalList>
+          <li>If a sender includes an illegal, prohibited, dangerous, or undeclared item in a parcel, the sender alone is liable for that item and its consequences, including any loss, damage, fine, seizure, or legal action that results &mdash; Trickle is not liable.</li>
+          <li>If a traveler steals, misappropriates, damages, loses, or otherwise fails to safeguard a parcel entrusted to them, the traveler alone is liable for that conduct and any resulting loss &mdash; Trickle is not liable. Trickle is a coordination platform and does not take custody, control, or ownership of any parcel.</li>
+          <li>For the cases above, or similar situations, Trickle will cooperate with law enforcement, courts, and regulators and provide any information we hold, in accordance with applicable law, upon a valid request. However, Trickle cannot guarantee the safety, security, recovery, or condition of any parcel or its contents. It is the sender&rsquo;s and traveler&rsquo;s own responsibility not to send or carry valuable, fragile, hazardous, or otherwise risky items through Trickle, except where an optional protection or insurance add-on is expressly offered and purchased in the app.</li>
+        </LegalList>
         <p>Nothing in these Terms excludes or limits liability that cannot legally be excluded, including liability for fraud, willful misconduct, or rights that consumers cannot waive under applicable law.</p>
       </LegalSection>
 
-      <LegalSection id="termination" title="12. Suspension and termination">
+      <LegalSection id="assurance" title="12. Trickle Assurance (discretionary goodwill support)">
+        <p>Separately from, and without affecting, Section 11 above, Trickle may choose to offer a limited, discretionary goodwill payment &mdash; shown in the app as &ldquo;Trickle Assurance&rdquo; or similar &mdash; toward a sender&rsquo;s loss when a parcel is lost, stolen, or damaged in transit. This is a voluntary benefit, not insurance, not a warranty, and not an admission of liability or fault by Trickle.</p>
+        <LegalList>
+          <li>Whether to offer, approve, or pay any amount under this program is entirely at Trickle&rsquo;s discretion, decided case by case, and is not a right or entitlement you can demand or enforce.</li>
+          <li>Any payment is capped at the amount shown in the app at the relevant time (which may be revised) and is not tied to, and may be lower than, the parcel&rsquo;s declared value.</li>
+          <li>It does not apply to prohibited, illegal, undeclared, or misrepresented items, to losses arising from a user&rsquo;s own breach of these Terms, or where a report is not filed promptly with the evidence Support requests (e.g., handoff photos, timestamps, chat history).</li>
+          <li>It is separate from, and does not replace, any optional paid protection or insurance add-on that may be offered in the app, which (where purchased) is underwritten and administered by a third-party insurer under its own policy terms.</li>
+          <li>Trickle may modify, limit, suspend, or discontinue this program at any time, including after a loss has occurred but before payment, without liability for doing so.</li>
+        </LegalList>
+      </LegalSection>
+
+      <LegalSection id="termination" title="13. Suspension and termination">
         <p>You may stop using Trickle and request account deletion at any time through Account Settings or Support. We may suspend or terminate access for violations, fraud, safety risks, non-payment, legal requirements, or conduct that harms users or the service.</p>
         <p>Account deletion deactivates the account and follows the retention schedule in the Privacy Policy. Payment, dispute, safety, fraud, tax, parcel, travel, and chat records may be retained for up to 30 days, or longer where a legal hold or legal requirement applies.</p>
       </LegalSection>
 
-      <LegalSection id="changes" title="13. Changes to these Terms">
+      <LegalSection id="changes" title="14. Changes to these Terms">
         <p>We may update these Terms as the service or legal requirements change. We will update the date above and provide additional notice for material changes where required. Continued use after the effective date means the updated Terms apply to future use.</p>
       </LegalSection>
 
-      <LegalSection id="contact" title="14. Contact and complaints">
+      <LegalSection id="contact" title="15. Contact and complaints">
         <p>For questions, complaints, account deletion, safety concerns, or disputes, contact <a className="font-semibold text-[#e85b43] underline" href="mailto:support@trickle.org.in">support@trickle.org.in</a>. Include the relevant request, match, or payment reference, but never include an OTP or password.</p>
       </LegalSection>
     </LegalPage>
