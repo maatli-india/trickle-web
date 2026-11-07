@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowUpDown, MapPin, X } from "lucide-react";
 import type { LocationForm } from "@/components/forms/location-fields";
 import { formatLocalLocation, searchLocalLocations } from "@/lib/local-location-search";
+import { apiRequest } from "@/services/api-client";
 
 type AddressSuggestion = {
   place_id: string;
@@ -79,8 +80,15 @@ function RouteField({
             return;
           }
         }
-        const response = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(value.address)}`, { signal: controller.signal });
-        if (response.ok) setSuggestions((await response.json()).predictions || []);
+        const places = await apiRequest<{ items?: Array<{ placeId: string; description: string; mainText?: string; secondaryText?: string }> }>(
+          `/v1/locations/autocomplete?q=${encodeURIComponent(value.address)}&source=web`,
+          { signal: controller.signal },
+        );
+        setSuggestions((places.items || []).map((place) => ({
+          place_id: place.placeId,
+          description: place.description,
+          structured_formatting: { main_text: place.mainText, secondary_text: place.secondaryText },
+        })));
       } catch (error) {
         if ((error as Error).name !== "AbortError") setSuggestions([]);
       } finally {
@@ -102,14 +110,15 @@ function RouteField({
       setFocused(false);
       return;
     }
-    const response = await fetch(`/api/places/details?placeId=${encodeURIComponent(suggestion.place_id)}`);
-    if (!response.ok) return;
-    const result = await response.json();
-    const location = result.result?.geometry?.location;
-    if (location) {
-      const address = result.result.formatted_address || suggestion.description;
+    const place = await apiRequest<{ item?: { aliases?: string[]; lat: number; lng: number } }>(
+      `/v1/locations/resolve-place?placeId=${encodeURIComponent(suggestion.place_id)}&source=web`,
+    ).catch(() => null);
+    if (!place) return;
+    if (place.item) {
+      // aliases[0] is Google's full formatted address.
+      const address = place.item.aliases?.[0] || suggestion.description;
       selectedAddressRef.current = address;
-      onChange({ address, lat: String(location.lat), lng: String(location.lng) });
+      onChange({ address, lat: String(place.item.lat), lng: String(place.item.lng) });
     }
     setFocused(false);
   };

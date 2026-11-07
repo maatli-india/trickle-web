@@ -6,6 +6,8 @@ import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
+  Check,
+  Copy,
   ImagePlus,
   MapPin,
   Navigation,
@@ -22,7 +24,9 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { extractOneItem, type ParcelMatch } from "@/types/travel";
 import { formatCategory } from "@/lib/format-category";
+import { formatLocalLocation, type LocalLocation } from "@/lib/local-location-search";
 import { getParcelMatch } from "@/services/parcel-matches";
+import { initiateMaskedCall } from "@/services/call";
 import { fetchChatFileUrl, uploadChatImage } from "@/services/files";
 import { apiRequest } from "@/services/api-client";
 import {
@@ -169,6 +173,9 @@ function ChatPageContent({ id }: { id: string }) {
   const parcelLabel = match?.parcelDescription || formatCategory(match?.parcelCategory) || "Parcel";
   const routeLabel = match?.from?.address && match?.to?.address ? `${match.from.address} -> ${match.to.address}` : "";
   const myBubbleColor = isSender ? "#101828" : "#0F6E56";
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
+  const [callBusy, setCallBusy] = useState(false);
+  const [phoneCopied, setPhoneCopied] = useState(false);
 
   const clearCounterpartTypingTimer = () => {
     if (counterpartTypingTimerRef.current) {
@@ -473,15 +480,12 @@ function ChatPageContent({ id }: { id: string }) {
     setPendingUploads((current) => current.filter((item) => item.localId !== localId));
   };
 
+  // Area-level label only; the pin itself carries the exact lat/lng.
   const resolveAddressForCoords = async (lat: number, lng: number): Promise<string> => {
-    try {
-      const response = await fetch(`/api/places/reverse-geocode?lat=${lat}&lng=${lng}`);
-      if (!response.ok) return "";
-      const data = (await response.json()) as { results?: Array<{ formatted_address?: string }> };
-      return data.results?.[0]?.formatted_address || "";
-    } catch {
-      return "";
-    }
+    const nearby = await apiRequest<{ items?: LocalLocation[] }>(
+      `/v1/locations/nearby?lat=${lat}&lng=${lng}&radiusKm=25&limit=1`,
+    ).catch(() => null);
+    return nearby?.items?.[0] ? formatLocalLocation(nearby.items[0]) : "";
   };
 
   const shareCurrentLocation = () => {
@@ -566,7 +570,19 @@ function ChatPageContent({ id }: { id: string }) {
                 )}
               </div>
             </div>
-            <a href={isSender ? `tel:${match.travelerPhone || ""}` : `tel:${match.senderPhone || ""}`} aria-label={`Call ${counterpart}`} className="grid size-10 shrink-0 place-items-center rounded-full bg-[#0F6E56] text-white"><Phone size={16} /></a>
+            {maskedPhone ? (
+              <span className="group relative flex items-center gap-1.5 rounded-full border border-[#E4E8F0] px-3 py-1.5 text-sm font-medium text-[#1B2230]" title="Masked number (tap to copy)">
+                <Phone size={13} className="shrink-0 text-[#8991A3]" />
+                <span>{maskedPhone}</span>
+                <button type="button" className="ml-1 opacity-0 transition group-hover:opacity-100" aria-label="Copy phone number" onClick={() => { navigator.clipboard.writeText(maskedPhone).then(() => { setPhoneCopied(true); setTimeout(() => setPhoneCopied(false), 2000); }); }}>
+                  {phoneCopied ? <Check size={13} className="text-[#0F6E56]" /> : <Copy size={13} className="text-[#8991A3] hover:text-[#0F6E56]" />}
+                </button>
+              </span>
+            ) : (
+              <button type="button" disabled={callBusy} aria-label={`Call ${counterpart}`} className={`grid size-10 shrink-0 place-items-center rounded-full bg-[#0F6E56] text-white ${callBusy ? "animate-pulse" : ""}`} onClick={async () => { setCallBusy(true); try { const response = await initiateMaskedCall(id); if (response?.phone) setMaskedPhone(response.phone); } catch { /* silent — button stays enabled for retry */ } finally { setCallBusy(false); } }}>
+                <Phone size={16} />
+              </button>
+            )}
           </div>
 
           <div className="mx-5 mt-4 flex items-center gap-2 rounded-xl bg-[#EEF1F6] px-4 py-3 text-sm font-semibold text-[#5A6478] sm:mx-7"><Package size={14} color="#8991A3" /><span className="truncate">{parcelLabel}{routeLabel ? ` · ${routeLabel}` : ""}{!isSender && match.travelerPayoutAmount ? ` · You will earn ₹${match.travelerPayoutAmount}` : ""}</span></div>

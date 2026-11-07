@@ -46,16 +46,28 @@ const refreshWebSession = async () => {
   return refreshPromise;
 };
 
+// Extracts a human-readable message from the backend response body.
+// transitorder returns `message` (string) for simple errors and `messages`
+// (map or string) for validation errors — handle both.
 const parseApiError = async (response: Response) => {
   const responseText = await response.text();
-  let details: { message?: string; error?: string } | undefined;
+  let details: { message?: string; messages?: unknown; error?: string } | undefined;
   try {
-    details = responseText ? (JSON.parse(responseText) as { message?: string; error?: string }) : undefined;
+    details = responseText ? (JSON.parse(responseText) as typeof details) : undefined;
   } catch {
     details = undefined;
   }
+  let text = details?.message || details?.error;
+  if (!text && details?.messages) {
+    if (typeof details.messages === "string") {
+      text = details.messages;
+    } else if (typeof details.messages === "object" && details.messages !== null) {
+      const entries = Object.entries(details.messages as Record<string, string>);
+      text = entries.map(([field, msg]) => `${field}: ${msg}`).join("; ");
+    }
+  }
   const error = new Error(
-    details?.message || details?.error || `API request failed with status ${response.status}`,
+    text || `API request failed with status ${response.status}`,
   ) as Error & { status?: number; data?: unknown };
   error.status = response.status;
   error.data = details;
@@ -86,7 +98,6 @@ export async function apiRequest<T>(path: string, init?: RequestInit, canRefresh
   const accessToken = typeof window !== "undefined" ? window.localStorage.getItem(ACCESS_TOKEN_KEY) : null;
   const deviceId = typeof window !== "undefined" ? window.localStorage.getItem(DEVICE_ID_KEY) : null;
   const method = init?.method || "GET";
-  console.log(`[HTTP] ${method} ${path}`);
   let response: Response;
   try {
     response = await fetch(apiUrl, {
@@ -99,7 +110,10 @@ export async function apiRequest<T>(path: string, init?: RequestInit, canRefresh
       },
     });
   } catch (error) {
-    console.error(`[HTTP] ${method} ${path} — network request failed`, error);
+    // An abort is a superseded request (e.g. the user kept typing), not a network failure.
+    if ((error as Error).name !== "AbortError") {
+      console.error(`[HTTP] ${method} ${path} — network request failed`, error);
+    }
     throw error;
   }
 
@@ -115,7 +129,6 @@ export async function apiRequest<T>(path: string, init?: RequestInit, canRefresh
     await parseApiError(response);
   }
 
-  console.log(`[HTTP] ${method} ${path} — ${response.status}`);
   if (response.status === 204) return null as T;
   return response.json() as Promise<T>;
 }

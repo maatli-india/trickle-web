@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchAvatarUrl } from "@/services/files";
+import { fetchAvatarUrl, invalidateAvatarCache } from "@/services/files";
 import { avatarTint, initials } from "@/lib/home-constants";
 
 // refreshKey lets a caller force a refetch after an upload/delete without
@@ -20,6 +20,9 @@ export function Avatar({
   className?: string;
   refreshKey?: number;
 }) {
+  // refreshKey > 0 means the caller did an upload/delete — bust the
+  // sessionStorage cache so AvatarImage's fetch hits the API again.
+  if (refreshKey > 0 && userId) invalidateAvatarCache(userId);
   return <AvatarImage key={`${userId || ""}:${refreshKey}`} userId={userId} name={name} className={className} />;
 }
 

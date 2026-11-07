@@ -4,8 +4,7 @@ const nextConfig: NextConfig = {
   // Stop advertising the framework to drive-by scanners.
   poweredByHeader: false,
   async headers() {
-    // Static, non-per-request security headers. The CSP itself (which
-    // needs a fresh nonce per request) is set in middleware.ts instead.
+    // Static security headers (no CSP middleware — nonce CSP broke /register on Netlify).
     return [
       {
         source: "/:path*",
@@ -37,7 +36,14 @@ const nextConfig: NextConfig = {
     // need to resolve a Kosh redirect server-side first, not get proxied
     // straight to a same-named-but-wrong path on the real API. fallback
     // only applies once no filesystem route or dynamic route matched.
-    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.trickle-dev.maatli.com/trickle";
+    const fromEnv = process.env.NEXT_PUBLIC_API_BASE_URL?.trim().replace(/\/$/, "");
+    const apiBaseUrl =
+      fromEnv ||
+      (process.env.NODE_ENV === "production"
+        ? (() => {
+            throw new Error("NEXT_PUBLIC_API_BASE_URL is required in production (set it in the GitHub environment).");
+          })()
+        : "http://localhost:7003/trickle");
     return {
       fallback: [{
         source: "/api/:path*",

@@ -11,7 +11,7 @@ import { listParcelMatches } from "@/services/parcel-matches";
 import { getTravelPlanInterest, recordTravelPlanView, registerTravelPlanInterest } from "@/services/travel-plans";
 import { extractListItems, type ParcelMatch } from "@/types/travel";
 import { inputClass, labelClass } from "@/components/forms/location-fields";
-import { CATEGORIES, MAX_PHOTOS, PICKUP_HANDOVER_OPTIONS, DELIVERY_HANDOVER_OPTIONS, getHandoverOptions, BLOCKING_REQUEST_STATUSES } from "@/lib/request-form-constants";
+import { CATEGORIES, MAX_PHOTOS, PICKUP_HANDOVER_OPTIONS, DELIVERY_HANDOVER_OPTIONS, getHandoverOptions, BLOCKING_REQUEST_STATUSES, type HandoverOption } from "@/lib/request-form-constants";
 import { SafetyDeclarationModal, type SafetyDeclaration } from "@/components/forms/safety-declaration-modal";
 import { getRequestStatusLabel } from "@/lib/parcel-status";
 import { SavedAddressPicker } from "@/components/saved-address-picker";
@@ -224,6 +224,14 @@ export default function TravellerRequestPage() {
   const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips ?? 0;
   const pickupOptions = getHandoverOptions(traveller, "pickupHandovers", "pickupHandover", PICKUP_HANDOVER_OPTIONS);
   const deliveryOptions = getHandoverOptions(traveller, "deliveryHandovers", "deliveryHandover", DELIVERY_HANDOVER_OPTIONS);
+
+  // Auto-select when there's exactly one option — no point making the user click.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (pickupOptions.length === 1 && !pickup) setPickup(pickupOptions[0].key);
+    if (deliveryOptions.length === 1 && !delivery) setDelivery(deliveryOptions[0].key);
+  }, [selection]);
+
   const maxWeight = traveller.maxWeightKg || 20;
   const maxPackages = traveller.maxParcelCount || 5;
   const tripClosed = !acceptingNewRequests;
@@ -306,9 +314,9 @@ export default function TravellerRequestPage() {
           parcelDescription: description.trim() || category,
           estimatedWeightKg: numericWeight,
           packageCount: Math.max(1, numericPackageCount),
-          pickupOption: pickup,
+          pickupOption: pickupOptions.find((o) => o.key === pickup)?.value || pickup,
           pickupNote: pickupNote || undefined,
-          deliveryOption: delivery,
+          deliveryOption: deliveryOptions.find((o) => o.key === delivery)?.value || delivery,
           deliveryNote: deliveryNote || undefined,
           note: message || undefined,
           safetyDeclaration,
