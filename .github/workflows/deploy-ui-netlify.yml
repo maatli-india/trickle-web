@@ -243,7 +243,6 @@ jobs:
           fi
           {
             echo "DEPLOY_ID=$DEPLOY_ID"
-            echo "DEPLOY_URL=$DEPLOY_URL"
             echo "SITE_URL=$(jq -r '.url // empty' deploy.json)"
           } >> "$GITHUB_ENV"
 
@@ -300,7 +299,6 @@ jobs:
           fi
           {
             echo "DEPLOY_ID=$DEPLOY_ID"
-            echo "DEPLOY_URL=$(jq -r '.deploy_ssl_url // .deploy_url // empty' restore.json)"
             echo "PREV_ID=$PREV_ID"
             echo "RESTORED_BRANCH=$R_BRANCH"
             echo "RESTORED_MESSAGE=$R_MSG"
@@ -338,16 +336,13 @@ jobs:
           L=("$HEAD" ""
             "🔧 *Service:*  \`${SERVICE_NAME}\`"
             "🌍 *Environment:*  \`${ENV_NAME^^}\`"
-            "⚙️ *Action:*  \`$([ "$MODE" = restore ] && echo rollback || echo deploy)\`"
             "👤 *By:*  \`${ACTOR}\`"
             "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
           L+=("🆔 *Netlify deploy ID:*  \`${DEPLOY_ID:-n/a}\`")
-          if [ -n "${DEPLOY_URL:-}" ]; then L+=("🔗 *Deploy URL:*  ${DEPLOY_URL}"); fi
           if [ -n "${SITE_URL:-}" ]; then L+=("🌐 *Site:*  ${SITE_URL}"); fi
           L+=("💬 *Message:*  \`${MG}\`")
-          if [ "$JOB_STATUS" = success ]; then
-            L+=("↩️ *Rollback:*  \`workflow_dispatch → build_tag=${DEPLOY_ID}\`")
-            if [ -n "${PREV_ID:-}" ]; then L+=("⏮ *Undo (previous):*  \`build_tag=${PREV_ID}\`"); fi
+          if [ "$JOB_STATUS" = success ] && [ -n "${PREV_ID:-}" ]; then
+            L+=("↩️ *Rollback:*  \`build_tag=${PREV_ID}\`")
           fi
 
           printf '%s  \n' "${L[@]}" >> "$GITHUB_STEP_SUMMARY"
