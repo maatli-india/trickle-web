@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, BellRing, Check, PackageX } from "lucide-react";
+import { BellRing, Check, PackageX } from "lucide-react";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -55,8 +55,8 @@ type Traveller = {
   to?: Location;
   maxWeightKg?: number;
   maxParcelCount?: number;
-  pricePerPackage?: number;
-  senderDisplayPricePerPackage?: number;
+  pricePerWeightKg?: number;
+  senderDisplayPricePerWeightKg?: number;
   price?: number;
   pickupHandovers?: string[];
   pickupHandover?: string;
@@ -99,7 +99,6 @@ export default function TravellerRequestPage() {
   const [pickupNote, setPickupNote] = useState("");
   const [delivery, setDelivery] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState("");
-  const [amount, setAmount] = useState("");
   const [message, setMessage] = useState("");
   const [parcelImages, setParcelImages] = useState<File[]>([]);
   const [showPickupPicker, setShowPickupPicker] = useState(false);
@@ -114,7 +113,6 @@ export default function TravellerRequestPage() {
           setSelection(parsed);
           setDescription(parsed.parcelNotes || "");
           setWeight(String(Math.min(1, Number(parsed.traveller.maxWeightKg) || 1)));
-          setAmount(String(parsed.traveller.senderDisplayPricePerPackage ?? parsed.traveller.pricePerPackage ?? parsed.traveller.price ?? ""));
           setAcceptingNewRequests(parsed.traveller.acceptingNewRequests !== false);
         }
       } catch {
@@ -219,7 +217,8 @@ export default function TravellerRequestPage() {
   const { traveller, from, to, pickupDate } = selection;
   const travellerName = traveller.user?.name || traveller.name || "Traveller";
   const travelerUserId = traveller.travelerUserId || traveller.travelerId || traveller.userId || traveller.user?.id;
-  const defaultAmount = Number(traveller.senderDisplayPricePerPackage ?? traveller.pricePerPackage ?? traveller.price ?? 0);
+  // The backend prices every request as the trip's rate × estimatedWeightKg; the sender can't edit it.
+  const ratePerKg = Number(traveller.senderDisplayPricePerWeightKg ?? traveller.pricePerWeightKg ?? traveller.price ?? 0);
   const rating = traveller.user?.rating ?? traveller.user?.ratings ?? traveller.rating ?? traveller.ratings;
   const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips ?? 0;
   const pickupOptions = getHandoverOptions(traveller, "pickupHandovers", "pickupHandover", PICKUP_HANDOVER_OPTIONS);
@@ -237,6 +236,7 @@ export default function TravellerRequestPage() {
   const tripClosed = !acceptingNewRequests;
   const numericWeight = Number(weight);
   const numericPackageCount = Number(packageCount);
+  const totalPrice = Number((ratePerKg * (Number.isFinite(numericWeight) ? numericWeight : 0)).toFixed(2));
 
   const openDeclaration = async () => {
     setError("");
@@ -264,8 +264,8 @@ export default function TravellerRequestPage() {
       setError("Choose a package category, pickup, and delivery option.");
       return;
     }
-    if (!Number(amount) || Number(amount) <= 0) {
-      setError("Enter an amount for the traveller.");
+    if (!(ratePerKg > 0)) {
+      setError("This trip's price isn't available right now. Please try again.");
       return;
     }
     if (!Number.isFinite(numericWeight) || numericWeight < 0.1 || numericWeight > maxWeight) {
@@ -307,7 +307,6 @@ export default function TravellerRequestPage() {
           travelerName: travellerName,
           parcelType: category,
           parcelCategory: category,
-          amount: Number(amount) * Math.max(1, numericPackageCount),
           from: { address: from.address, lat: Number(from.lat), lng: Number(from.lng) },
           to: { address: to.address, lat: Number(to.lat), lng: Number(to.lng) },
           targetDeliveryTime: pickupDate,
@@ -358,7 +357,7 @@ export default function TravellerRequestPage() {
         <section className="mt-8 border-t-2 border-[#e85b43] bg-[#183b3a] p-6 text-white sm:p-10">
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#e7b65c]">Request traveller</p>
           <h1 className="mt-3 max-w-2xl text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">Tell {travellerName} about your parcel</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-[#c5d4ce]">Add the item details and your offer. {travellerName} can review the request before accepting it.</p>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-[#c5d4ce]">Add the item details. {travellerName} can review the request before accepting it.</p>
         </section>
 
         <section className="mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
@@ -620,29 +619,14 @@ export default function TravellerRequestPage() {
                   )}
                 </div>
 
-                <label className={labelClass}>
-                  Your offer
-                  {defaultAmount > 0 && (
-                    <span className="mb-1.5 block text-xs font-normal normal-case tracking-normal text-[#8a8579]">
-                      Prefilled from {travellerName.split(" ")[0]}&apos;s price of ₹{defaultAmount} per package — not a total. Adjust it if you&apos;re sending more than one package.
-                    </span>
-                  )}
-                  <input required type="number" min={1} value={amount} onChange={(event) => setAmount(event.target.value)} className={inputClass} placeholder="₹" />
-                </label>
-
-                {Number(amount) > 0 && numericPackageCount > 1 && (
-                  <p className="inline-block w-fit rounded-full bg-[#e5f0eb] px-3 py-1.5 text-xs font-semibold text-[#285c59]">
-                    ₹{amount} × {numericPackageCount} packages = ₹{Number(amount) * numericPackageCount} total
-                  </p>
-                )}
-
-                {defaultAmount > 0 && Number(amount) > 0 && Number(amount) < defaultAmount && (
-                  <p className="flex items-start gap-2 rounded-lg bg-[#fff4d8] px-3.5 py-2.5 text-xs leading-5 text-[#7a5310]">
-                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                    <span>
-                      This is below {travellerName.split(" ")[0]}&apos;s listed price of ₹{defaultAmount} — not a hard rule, but offers below it are more likely to get declined.
-                    </span>
-                  </p>
+                {ratePerKg > 0 && (
+                  <div>
+                    <p className={labelClass}>Total amount</p>
+                    <p className="mt-1 text-xs text-[#8a8579]">Set by {travellerName.split(" ")[0]} — this can&apos;t be changed.</p>
+                    <p className="mt-2 inline-block w-fit rounded-full bg-[#e5f0eb] px-3 py-1.5 text-xs font-semibold text-[#285c59]">
+                      ₹{ratePerKg}/kg × {numericWeight || 0} kg = ₹{totalPrice} total
+                    </p>
+                  </div>
                 )}
 
                 <label className={labelClass}>
