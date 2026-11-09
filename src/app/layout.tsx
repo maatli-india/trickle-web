@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Poppins } from "next/font/google";
 import "./globals.css";
+import { PwaSetup } from "@/components/pwa-setup";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,6 +24,22 @@ const poppins = Poppins({
 export const metadata: Metadata = {
   title: "Trickle | Delivery that follows the journey",
   description: "People-powered parcel delivery that follows the journey.",
+  applicationName: "Trickle",
+  // Installed-app (PWA) behaviour on iPhone/iPad; the manifest
+  // (src/app/manifest.ts) covers everything else.
+  appleWebApp: {
+    capable: true,
+    title: "Trickle",
+    statusBarStyle: "default",
+  },
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#fbfaf7",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -31,7 +48,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${poppins.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <PwaSetup />
+      </body>
     </html>
   );
 }

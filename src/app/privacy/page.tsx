@@ -11,7 +11,7 @@ export default function PrivacyPolicyPage() {
     <LegalPage
       eyebrow="Trickle privacy"
       title="Privacy Policy"
-      updated="6 October 2026"
+      updated="6 November 2026"
       intro="This policy explains how Trickle handles information when you use our mobile app, website, and people-powered delivery services. We collect what we need to help a parcel follow the journey, keep users safe, and support payments and disputes."
       sections={[
         { href: "#overview", label: "Overview" },
@@ -19,7 +19,7 @@ export default function PrivacyPolicyPage() {
         { href: "#use", label: "How we use it" },
         { href: "#sharing", label: "Sharing" },
         { href: "#consent", label: "Consent" },
-        { href: "#biometric", label: "Selfie verification" },
+        { href: "#biometric", label: "Face data (selfie check)" },
         { href: "#security", label: "Security" },
         { href: "#retention", label: "Retention" },
         { href: "#rights", label: "Your choices" },
@@ -74,10 +74,14 @@ export default function PrivacyPolicyPage() {
         <p>We do not use a general acceptance of this policy as consent for unrelated purposes. Where sensitive identity-verification information is processed, we will provide the applicable provider notice and request the additional consent or authorization required for that verification flow.</p>
       </LegalSection>
 
-      <LegalSection id="biometric" title="6. Identity verification and selfie checks">
-        <p>Some features, such as the blue verification badge, ask you to take a live selfie so we can confirm it is really you. We compare that selfie against your existing profile photo using an automated facial-comparison service (AWS Rekognition) and tell you whether it is a match.</p>
-        <p>The selfie photo itself is used for that one comparison only. It is never stored on your account, never shown to other users, never used for any other purpose, and is deleted from our systems immediately after the comparison completes — whether the check succeeds or fails. We keep only the yes/no result (and the time it happened) as your verification status, not the image.</p>
-        <p>This check is optional: declining it does not block your account, it only withholds the verification badge. Where a platform requires us to disclose biometric-adjacent processing (for example, an app store's data-safety or privacy-label questionnaire), this section is the authoritative description of that processing.</p>
+      <LegalSection id="biometric" title="6. Photo Verified badge (selfie check) and face data">
+        <p><strong>What it is.</strong> The optional &ldquo;Photo Verified&rdquo; badge shows other users that your profile photo is a real, recent photo of you. It only checks that a live selfie matches your profile photo. It does not verify your legal identity; identity verification is a separate, DigiLocker-based process.</p>
+        <p><strong>What face data we collect.</strong> Only if you choose to start the check, we collect one live selfie taken with your front camera at that moment. We compare it with the profile photo already on your account. We do not collect face data from anyone else, from your photo library, or at any other time.</p>
+        <p><strong>How it is used.</strong> The selfie is uploaded over an encrypted connection to our own secure file storage, which runs on Amazon Web Services (Amazon S3), and sent, together with your profile photo, to Amazon Web Services&rsquo; Rekognition service, which acts as our service provider. Rekognition checks that the selfie shows exactly one clear, unobscured face and returns a similarity score for the two photos. We use that score for one purpose only: to decide whether to show the Photo Verified badge on your profile. Face data is never used for advertising, tracking, profiling, identifying you to others, or training any model.</p>
+        <p><strong>What we keep.</strong> We keep only a yes/no Photo Verified status and the time it was granted. We do not store the selfie, a face template, a faceprint, facial measurements, or the similarity score, and we do not create or keep any face collection at AWS.</p>
+        <p><strong>How long the selfie is retained.</strong> The selfie is permanently deleted from our storage as soon as the comparison finishes, whether the check passes or fails. We keep no backups or copies of it. If a selfie is uploaded but the check is never completed (for example, the app is closed mid-way), an automatic clean-up deletes it within two hours. AWS processes the images only to perform the comparison and does not keep them afterwards, and we have opted out of AWS using this content to improve its services.</p>
+        <p><strong>Sharing.</strong> The selfie and face data are never shown to other users and are not sold or shared with any third party other than AWS for the comparison described above. Other users see only whether you have the badge.</p>
+        <p><strong>Your choices.</strong> The check is optional. Declining it does not limit your account; it only means the badge is not shown. Deleting your account removes your Photo Verified status. Where a platform requires us to disclose face-data processing (for example, an app store&rsquo;s privacy questionnaire), this section is the authoritative description of that processing.</p>
       </LegalSection>
 
       <LegalSection id="storage" title="7. What we store and who can access it">
@@ -92,7 +96,7 @@ export default function PrivacyPolicyPage() {
       </LegalSection>
 
       <LegalSection id="retention" title="9. Retention and deletion">
-        <p>Selfie verification photos are never retained in the first place — see <a className="font-semibold text-[#e85b43] underline" href="#biometric">Section 6</a>. They are deleted immediately after each verification attempt, so there is nothing left to delete on account closure.</p>
+        <p>Photo Verified selfies are not kept — see <a className="font-semibold text-[#e85b43] underline" href="#biometric">Section 6</a>. Each selfie is deleted as soon as its comparison finishes (or within two hours if the check is never completed), so there is nothing left to delete on account closure.</p>
         <p>When you request account deletion, we immediately deactivate the account, revoke active sessions and notification tokens, anonymize direct profile identifiers, and purge user-owned profile files where possible.</p>
         <p>Operational records for payments, disputes, fraud and safety, tax and payouts, parcel requests and matches, travel plans, and chat are targeted for deletion or irreversible anonymization within 30 days after account deletion. The retention schedule is described in this section.</p>
         <p>Records under an active legal hold, dispute, fraud or safety investigation, or a longer legal or regulatory requirement may be retained for longer. We restrict those records to the relevant purpose and remove them when the hold or requirement ends.</p>
