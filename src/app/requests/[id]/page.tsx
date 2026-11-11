@@ -89,6 +89,10 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
   const [verifyRequestBusy, setVerifyRequestBusy] = useState(false);
   const [verifyRequested, setVerifyRequested] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
+  const [callBusy, setCallBusy] = useState(false);
+  const [callError, setCallError] = useState<string | null>(null);
+  const [phoneCopied, setPhoneCopied] = useState(false);
   const handoffInputRefs = useRef<Array<HTMLInputElement | null>>([]);
   const verifyModalAutoOpenedRef = useRef(false);
 
@@ -240,10 +244,6 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
     latestOffer?.proposedBy === "sender"
       ? match.senderName || "Sender"
       : match.travelerName || "Traveller";
-  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
-  const [callBusy, setCallBusy] = useState(false);
-  const [callError, setCallError] = useState<string | null>(null);
-  const [phoneCopied, setPhoneCopied] = useState(false);
   const canCancel = CANCELLABLE_STATUSES.has(status);
   const isPendingLike = ["pending", "negotiating", "countered", "searching"].includes(status);
   const isPayGate = ["accepted", "accepted_awaiting_payment", "awaiting_payment", "payment_initiated"].includes(status);
