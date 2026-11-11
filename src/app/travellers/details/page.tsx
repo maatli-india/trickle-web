@@ -53,7 +53,7 @@ type Traveller = {
   deliveryHandover?: string;
   pickupHandovers?: string[];
   deliveryHandovers?: string[];
-  senderDisplayPricePerPackage?: number;
+  senderDisplayPricePerWeightKg?: number;
   additionalInfo?: string;
 };
 type Selection = {

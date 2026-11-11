@@ -119,5 +119,5 @@ export const tripFormPrefillFromPlan = (plan: TravelPlan): TripFormPrefill => ({
   restricted: new Set(plan.restrictedParcelTypes || []),
   maxWeight: String(plan.maxWeightKg || 5),
   maxParcelCount: String(plan.maxParcelCount || 1),
-  price: plan.pricePerPackage ? String(plan.pricePerPackage) : "",
+  price: plan.pricePerWeightKg ? String(plan.pricePerWeightKg) : "",
 });

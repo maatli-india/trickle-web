@@ -219,7 +219,7 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
   // A hardcoded multiplier here silently drifts out of sync with the real
   // amount createPaymentOrder returns.
   const payableAmount = (isSender && match.senderPayableAmount) || price;
-  const packageCount = match.packageCount && match.packageCount > 0 ? match.packageCount : 1;
+  const weightKg = match.estimatedWeightKg && match.estimatedWeightKg > 0 ? match.estimatedWeightKg : undefined;
   const counterpart = isSender ? match.travelerName || "Traveller" : match.senderName || "Sender";
   const offerHistory = match.offerHistory || [];
   const originalOffer = offerHistory.find(
@@ -560,16 +560,16 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
               completed, and showing "your rate"/"your offer total" there is
               actively misleading. This block was previously unconditional. */}
           {!isCancelledOrDeclined && !isNotPickedUp && !isInterrupted && !isAwaitingRecipient && !isReturnPending && (() => {
-            // Traveler: rate is the trip's own listed per-package price —
-            // total = rate × count (a reference, not what was agreed).
+            // Traveler: rate is the trip's own listed ₹/kg price —
+            // total = rate × weight (a reference, not what was agreed).
             // Sender: price (match.senderOfferedAmount) is already the
-            // pre-GST total the sender offered — divide back down for the
-            // per-package figure in the breakdown pill, don't multiply again.
-            const rate = !isSender ? travelPlan?.pricePerPackage : price ? price / packageCount : undefined;
-            if (rate == null) {
+            // pre-GST total — divide back down for the ₹/kg figure in the
+            // breakdown pill, don't multiply again.
+            const rate = !weightKg ? undefined : !isSender ? travelPlan?.pricePerWeightKg : price ? price / weightKg : undefined;
+            if (rate == null || !weightKg) {
               return <p className="mt-4 text-xl font-semibold">{price ? `₹${price}` : "Offer pending"}</p>;
             }
-            const total = !isSender ? rate * packageCount : price;
+            const total = !isSender ? Number((rate * weightKg).toFixed(2)) : price;
             return (
               <div className="mt-5 flex flex-col items-center rounded-2xl bg-white/10 px-6 py-7 text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#c5d4ce]">
@@ -577,7 +577,7 @@ function ParcelRequestDetailsContent({ id }: { id: string }) {
                 </p>
                 <p className="mt-1.5 text-4xl font-semibold text-[#e7b65c]">₹{total}</p>
                 <span className="mt-3 rounded-full bg-white/15 px-3.5 py-1.5 text-xs font-semibold text-white">
-                  ₹{Number(rate.toFixed(2))} × {packageCount} package{packageCount > 1 ? "s" : ""}
+                  ₹{Number(rate.toFixed(2))}/kg × {weightKg} kg
                 </span>
               </div>
             );

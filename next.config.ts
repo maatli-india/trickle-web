@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // EC2 image runs .next/standalone/server.js. Netlify's Next.js runtime forces standalone anyway.
+  output: "standalone",
   // Stop advertising the framework to drive-by scanners.
   poweredByHeader: false,
   async headers() {
