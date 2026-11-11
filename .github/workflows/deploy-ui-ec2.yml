@@ -1,8 +1,10 @@
 # UI service — Build & Deploy to EC2 via AWS SSM Run Command (no SSH; websites-only EC2 box behind CloudFront).
 #
-# `release` validates inputs and resolves branch/sha/message once. `deploy` runs per selected env
-# (matrix → GitHub Environment dev/qa/prod holds EC2_INSTANCE_ID + PUBLIC_HOST + API host), one env at a time.
-# NEXT_PUBLIC_API_BASE_URL is baked in at build time, so every image belongs to one env (tag prefix).
+# Same layout as the API workflow: `release` validates, resolves branch/sha/message and builds + pushes ONE image
+# (tag YYYYMMDD_hhmm.N) that runs in every env; no build when build_tag is an image tag.
+# `deploy-dev` / `deploy-qa` / `deploy-prod` only deploy, passing that Environment's NEXT_PUBLIC_API_BASE_URL to the
+# container as API_BASE_URL. The image is built with a placeholder API host that the container swaps at start
+# (see Dockerfile), so a dev image can go to qa/prod as is. Re-run failed jobs redeploys the same image.
 # `next build` runs natively on the x64 runner; the arm64 image only copies its standalone output,
 # so nothing runs under QEMU emulation.
 #
@@ -26,11 +28,11 @@ on:
         type: boolean
         default: false
       prod:
-        description: "PROD (alone, deploy only)"
+        description: "PROD (existing image tag only)"
         type: boolean
         default: false
       build_tag:
-        description: "Empty = selected branch · git SHA (7–40 hex) = that commit · image tag (<env>-YYYYMMDD_hhmm.N) = rollback, no build"
+        description: "Empty = selected branch · git SHA (7–40 hex) = that commit · image tag (YYYYMMDD_hhmm.N) = deploy that image, no build (PROD needs one)"
         type: string
         required: false
         default: ""
@@ -57,15 +59,17 @@ env:
 
 jobs:
   release:
-    name: Validate & metadata
+    name: Validate, metadata & build
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.meta.outputs.branch }}
       envs: ${{ steps.validate.outputs.envs }}
+      image_tag: ${{ steps.validate.outputs.mode == 'image' && steps.validate.outputs.tag || steps.suffix.outputs.suffix }}
       message: ${{ steps.meta.outputs.message }}
       mode: ${{ steps.validate.outputs.mode }}
       sha: ${{ steps.meta.outputs.sha }}
       short_sha: ${{ steps.meta.outputs.short_sha }}
+      suffix: ${{ steps.suffix.outputs.suffix }}
       tag: ${{ steps.validate.outputs.tag }}
     steps:
       - id: validate
@@ -82,37 +86,31 @@ jobs:
           if [ "$DEV" = true ]; then ENVS+=(dev); fi
           if [ "$QA" = true ]; then ENVS+=(qa); fi
           if [ "$PROD" = true ]; then ENVS+=(prod); fi
-          # Build too: the API host is baked into the image, so each build targets one env.
-          if [ "${#ENVS[@]}" -eq 0 ]; then
-            echo "::error:: No environment selected for ${ACTION}"
-            exit 1
-          fi
-          # PROD always builds and deploys in its own run: never build-only, never batched with dev/qa.
-          if [ "$PROD" = true ] && [ "${#ENVS[@]}" -gt 1 ]; then
-            echo "::error:: PROD deploys alone — untick dev/qa"
-            exit 1
-          fi
-          if [ "$PROD" = true ] && [ "$ACTION" = build ]; then
-            echo "::error:: PROD has no build-only run — use action=deploy"
+          if [ "$ACTION" = deploy ] && [ "${#ENVS[@]}" -eq 0 ]; then
+            echo "::error:: No environment selected for deploy"
             exit 1
           fi
 
-          # Image tags are "<env>-YYYYMMDD_hhmm.N"; any other 7–40 hex string is treated as a git SHA.
+          # Image tags are "YYYYMMDD_hhmm.N"; any other 7–40 hex string is treated as a git SHA.
           TAG=$(printf '%s' "$BUILD_TAG" | tr -d '[:space:]')
           if [ -z "$TAG" ]; then
             MODE=source
-          elif [[ "$TAG" =~ ^(dev|qa|prod)-[0-9]{8}_[0-9]{4}\.[0-9]+$ ]]; then
+          elif [[ "$TAG" =~ ^[0-9]{8}_[0-9]{4}\.[0-9]+$ ]]; then
             MODE=image
-            # An image only works on the env whose API host it was built with.
-            if [ "$ACTION" != deploy ] || [ "${#ENVS[@]}" -ne 1 ] || [ "${ENVS[0]}" != "${BASH_REMATCH[1]}" ]; then
-              echo "::error:: Image ${TAG} needs action=deploy and only the ${BASH_REMATCH[1]} env ticked"
+            if [ "$ACTION" != deploy ]; then
+              echo "::error:: An image tag needs action=deploy"
               exit 1
             fi
           elif [[ "${TAG,,}" =~ ^[0-9a-f]{7,40}$ ]]; then
             MODE=sha
             TAG=${TAG,,}
           else
-            echo "::error:: build_tag '${BUILD_TAG}' is neither an image tag (<env>-YYYYMMDD_hhmm.N) nor a git SHA (7–40 hex)"
+            echo "::error:: build_tag '${BUILD_TAG}' is neither an image tag (YYYYMMDD_hhmm.N) nor a git SHA (7–40 hex)"
+            exit 1
+          fi
+          # Same rule as the API workflow: PROD only gets an image already built and tested on dev/qa.
+          if [ "$PROD" = true ] && [ "$MODE" != image ]; then
+            echo "::error:: PROD deploys only an existing image tag (no fresh builds)"
             exit 1
           fi
 
@@ -128,6 +126,12 @@ jobs:
           # Full history: SHA resolution and the newest non-merge commit message both need it.
           fetch-depth: 0
 
+      - name: Login to DockerHub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - id: meta
         name: Resolve branch, sha and deploy message
         env:
@@ -138,27 +142,39 @@ jobs:
           TAG: ${{ steps.validate.outputs.tag }}
         run: |
           set -euo pipefail
-          SHA="$GITHUB_SHA"
-          if [ "$MODE" = sha ]; then
-            if ! SHA=$(git rev-parse --verify --quiet "${TAG}^{commit}"); then
-              echo "::error:: Commit ${TAG} not found (or ambiguous) in ${GITHUB_REPOSITORY}"
+          if [ "$MODE" = image ]; then
+            REF="${DOCKER_IMAGE}:${TAG}"
+            if ! docker pull --platform linux/arm64 "$REF" >/dev/null; then
+              echo "::error:: Image ${TAG} not found in ${DOCKER_IMAGE}"
               exit 1
             fi
-          fi
-
-          MG="$CUSTOM_MESSAGE"
-          if [ -z "$MG" ] && [ "$MODE" = image ]; then
-            MG="Rollback to image ${TAG}"
-          elif [ -z "$MG" ]; then
-            MG=$(git log -1 --pretty=%s "$SHA")
-            # GitHub merge commit: subject is "Merge pull request #N from …", body is the PR title.
-            if [[ "$MG" =~ ^Merge[[:space:]]pull[[:space:]]request ]]; then
-              MG=$(git log -1 --pretty=%b "$SHA" | sed '/^[[:space:]]*$/d' | head -1)
-            elif [[ "$MG" =~ ^Merge[[:space:]] ]]; then
-              MG=""
+            # Report the image's own branch/sha/message, not the selected branch's HEAD.
+            LABELS=$(docker inspect "$REF" --format '{{json .Config.Labels}}')
+            BRANCH=$(echo "$LABELS" | jq -r '."deploy.branch" // "n/a"')
+            SHA=$(echo "$LABELS" | jq -r '."deploy.sha" // "n/a"')
+            MG=$(echo "$LABELS" | jq -r '."deploy.message" // empty')
+            MG=${MG:-${CUSTOM_MESSAGE:-Deploy image ${TAG}}}
+          else
+            SHA="$GITHUB_SHA"
+            if [ "$MODE" = sha ]; then
+              if ! SHA=$(git rev-parse --verify --quiet "${TAG}^{commit}"); then
+                echo "::error:: Commit ${TAG} not found (or ambiguous) in ${GITHUB_REPOSITORY}"
+                exit 1
+              fi
             fi
-            # Other merges ("Merge branch 'x' of …" from git pull) say nothing: use the newest real commit.
-            if [ -z "$MG" ]; then MG=$(git log -1 --no-merges --pretty=%s "$SHA"); fi
+
+            MG="$CUSTOM_MESSAGE"
+            if [ -z "$MG" ]; then
+              MG=$(git log -1 --pretty=%s "$SHA")
+              # GitHub merge commit: subject is "Merge pull request #N from …", body is the PR title.
+              if [[ "$MG" =~ ^Merge[[:space:]]pull[[:space:]]request ]]; then
+                MG=$(git log -1 --pretty=%b "$SHA" | sed '/^[[:space:]]*$/d' | head -1)
+              elif [[ "$MG" =~ ^Merge[[:space:]] ]]; then
+                MG=""
+              fi
+              # Other merges ("Merge branch 'x' of …" from git pull) say nothing: use the newest real commit.
+              if [ -z "$MG" ]; then MG=$(git log -1 --no-merges --pretty=%s "$SHA"); fi
+            fi
           fi
           MG=$(printf '%s' "$MG" | tr '\n\r' '  ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-300)
 
@@ -174,66 +190,73 @@ jobs:
             echo "- Message: ${MG}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
-    name: ${{ inputs.action == 'build' && 'Build' || 'Deploy' }} → ${{ matrix.env }}
-    needs: release
-    runs-on: ubuntu-latest
-    environment: ${{ matrix.env }}
-    strategy:
-      # Only ticked envs run. dev+qa: dev first, qa skipped if dev fails. PROD always runs alone.
-      fail-fast: true
-      max-parallel: 1
-      matrix:
-        env: ${{ fromJSON(needs.release.outputs.envs) }}
-    concurrency:
-      group: ec2-${{ github.repository }}-${{ matrix.env }}
-      cancel-in-progress: false
-    env:
-      ACTION: ${{ inputs.action }}
-      ENV_NAME: ${{ matrix.env }}
-      MODE: ${{ needs.release.outputs.mode }}
-      NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
-      PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
-    steps:
-      - name: Check ${{ matrix.env }} config
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          CF_ORIGIN_SECRET: ${{ secrets.CF_ORIGIN_SECRET }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
-        run: |
-          set -euo pipefail
-          MISSING=()
-          if [ "$MODE" != image ] && [ -z "$NEXT_PUBLIC_API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
-          if [ -z "$DOCKERHUB_USERNAME" ]; then MISSING+=("DOCKERHUB_USERNAME (secret)"); fi
-          if [ -z "$DOCKERHUB_TOKEN" ]; then MISSING+=("DOCKERHUB_TOKEN (secret)"); fi
-          if [ "$ACTION" = deploy ] && [ -z "$PUBLIC_HOST" ]; then MISSING+=(PUBLIC_HOST); fi
-          if [ "$ACTION" = deploy ] && [ -z "$EC2_INSTANCE_ID" ]; then MISSING+=("EC2_INSTANCE_ID (secret)"); fi
-          if [ "$ACTION" = deploy ] && [ -z "$AWS_ACCESS_KEY_ID" ]; then MISSING+=("AWS_ACCESS_KEY_ID (secret)"); fi
-          if [ "$ACTION" = deploy ] && [ -z "$CF_ORIGIN_SECRET" ]; then MISSING+=("CF_ORIGIN_SECRET (secret)"); fi
-          if [ "${#MISSING[@]}" -gt 0 ]; then
-            echo "::error:: GitHub Environment '${ENV_NAME}' is missing: ${MISSING[*]}"
-            exit 1
-          fi
+      - name: IST date for build counter key
+        if: steps.validate.outputs.mode != 'image'
+        id: date
+        run: echo "d=$(TZ=Asia/Kolkata date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v7
-        if: env.MODE != 'image'
+      - name: Restore build counter
+        if: steps.validate.outputs.mode != 'image'
+        uses: actions/cache/restore@v4
         with:
-          ref: ${{ needs.release.outputs.sha }}
+          path: .build-counter
+          key: ${{ env.APP_NAME }}-${{ steps.date.outputs.d }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ env.APP_NAME }}-${{ steps.date.outputs.d }}-
+
+      - name: Generate image tag (YYYYMMDD_hhmm.N)
+        if: steps.validate.outputs.mode != 'image'
+        id: suffix
+        run: |
+          TS=$(TZ=Asia/Kolkata date +'%Y%m%d_%H%M')
+          F=.build-counter
+          N=1; [ -f "$F" ] && [ -s "$F" ] && N=$(($(cat "$F") + 1))
+          echo "$N" > "$F"
+          echo "suffix=${TS}.${N}" >> "$GITHUB_OUTPUT"
+
+      - name: Save build counter
+        if: steps.validate.outputs.mode != 'image'
+        uses: actions/cache/save@v4
+        with:
+          path: .build-counter
+          key: ${{ env.APP_NAME }}-${{ steps.date.outputs.d }}-${{ github.run_id }}
+
+      - name: Check out the build commit
+        if: steps.validate.outputs.mode == 'sha'
+        run: git checkout -q --detach "${{ steps.meta.outputs.sha }}"
 
       - uses: actions/setup-node@v7
-        if: env.MODE != 'image'
+        if: steps.validate.outputs.mode != 'image'
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
+
+      # Caches node_modules itself: with only the npm download cache, `npm ci` still took ~40-50s
+      # unpacking. A lockfile or Node major change misses and reinstalls.
+      - name: Restore node_modules
+        if: steps.validate.outputs.mode != 'image'
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: modules-${{ runner.os }}-${{ runner.arch }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
-        if: env.MODE != 'image'
+        if: steps.validate.outputs.mode != 'image' && steps.modules.outputs.cache-hit != 'true'
         run: npm ci
 
-      - name: Build (next build → .next/standalone)
-        if: env.MODE != 'image'
+      - name: Set up Docker Buildx
+        if: steps.validate.outputs.mode != 'image'
+        uses: docker/setup-buildx-action@v4
+
+      # Built once for every env: the API host is a placeholder the container replaces with API_BASE_URL at start.
+      - name: Build and push image (linux/arm64)
+        if: steps.validate.outputs.mode != 'image'
+        env:
+          BRANCH: ${{ steps.meta.outputs.branch }}
+          IMAGE_TAG: ${{ steps.suffix.outputs.suffix }}
+          MESSAGE: ${{ steps.meta.outputs.message }}
+          NEXT_PUBLIC_API_BASE_URL: https://api-base-url.placeholder.invalid
+          SHA: ${{ steps.meta.outputs.sha }}
         run: |
           set -euo pipefail
           npm run build
@@ -241,95 +264,55 @@ jobs:
             echo '::error:: .next/standalone/server.js missing — next.config.ts needs output: "standalone"'
             exit 1
           fi
+          docker buildx build --platform linux/arm64 --push -f Dockerfile \
+            --label "deploy.branch=${BRANCH}" \
+            --label "deploy.sha=${SHA}" \
+            --label "deploy.message=${MESSAGE}" \
+            -t "${DOCKER_IMAGE}:${IMAGE_TAG}" .
+          echo "- Image: \`${DOCKER_IMAGE}:${IMAGE_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: IST date for build counter key
-        if: env.MODE != 'image'
-        id: date
-        run: echo "d=$(TZ=Asia/Kolkata date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
-
-      - name: Restore build counter
-        if: env.MODE != 'image'
-        uses: actions/cache/restore@v4
-        with:
-          path: .build-counter
-          key: ${{ env.APP_NAME }}-${{ matrix.env }}-${{ steps.date.outputs.d }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ env.APP_NAME }}-${{ matrix.env }}-${{ steps.date.outputs.d }}-
-
-      - name: Generate image tag (<env>-YYYYMMDD_hhmm.N)
-        if: env.MODE != 'image'
-        id: tag
-        run: |
-          TS=$(TZ=Asia/Kolkata date +'%Y%m%d_%H%M')
-          F=.build-counter
-          N=1; [ -f "$F" ] && [ -s "$F" ] && N=$(($(cat "$F") + 1))
-          echo "$N" > "$F"
-          echo "image_tag=${ENV_NAME}-${TS}.${N}" >> "$GITHUB_OUTPUT"
-
-      - name: Save build counter
-        if: env.MODE != 'image'
-        uses: actions/cache/save@v4
-        with:
-          path: .build-counter
-          key: ${{ env.APP_NAME }}-${{ matrix.env }}-${{ steps.date.outputs.d }}-${{ github.run_id }}
-
-      - name: Set up Docker Buildx
-        if: env.MODE != 'image'
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push image (linux/arm64)
-        if: env.MODE != 'image'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: ${{ env.DOCKER_IMAGE }}:${{ steps.tag.outputs.image_tag }}
-          labels: |
-            deploy.branch=${{ needs.release.outputs.branch }}
-            deploy.sha=${{ needs.release.outputs.sha }}
-            deploy.message=${{ needs.release.outputs.message }}
-
-      - name: Resolve image
+  deploy-dev:
+    name: Deploy → DEV
+    runs-on: ubuntu-latest
+    needs: release
+    if: |
+      inputs.action == 'deploy' && inputs.dev
+    environment: dev
+    concurrency:
+      group: ec2-${{ github.repository }}-dev
+      cancel-in-progress: false
+    env:
+      ENV_NAME: dev
+      API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
+      MODE: ${{ needs.release.outputs.mode }}
+      PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+    steps:
+      - name: Check dev deploy config
         env:
-          BUILT_TAG: ${{ steps.tag.outputs.image_tag }}
-          INPUT_TAG: ${{ needs.release.outputs.tag }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          CF_ORIGIN_SECRET: ${{ secrets.CF_ORIGIN_SECRET }}
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
           set -euo pipefail
-          TAG=${BUILT_TAG:-$INPUT_TAG}
-          if [ "$MODE" = image ]; then
-            REF="${DOCKER_IMAGE}:${TAG}"
-            if ! docker pull --platform linux/arm64 "$REF" >/dev/null; then
-              echo "::error:: Image ${TAG} not found in ${DOCKER_IMAGE}"
-              exit 1
-            fi
-            # Report the image's own branch/sha/message, not the selected branch's HEAD.
-            LABELS=$(docker inspect "$REF" --format '{{json .Config.Labels}}')
-            {
-              echo "RESTORED_BRANCH=$(echo "$LABELS" | jq -r '."deploy.branch" // empty')"
-              echo "RESTORED_MESSAGE=$(echo "$LABELS" | jq -r '."deploy.message" // empty')"
-              echo "RESTORED_SHA=$(echo "$LABELS" | jq -r '."deploy.sha" // empty' | cut -c1-7)"
-            } >> "$GITHUB_ENV"
+          MISSING=()
+          if [ -z "$API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
+          if [ -z "$PUBLIC_HOST" ]; then MISSING+=(PUBLIC_HOST); fi
+          if [ -z "$EC2_INSTANCE_ID" ]; then MISSING+=("EC2_INSTANCE_ID (secret)"); fi
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then MISSING+=("AWS_ACCESS_KEY_ID (secret)"); fi
+          if [ -z "$CF_ORIGIN_SECRET" ]; then MISSING+=("CF_ORIGIN_SECRET (secret)"); fi
+          if [ "${#MISSING[@]}" -gt 0 ]; then
+            echo "::error:: GitHub Environment '${ENV_NAME}' is missing: ${MISSING[*]}"
+            exit 1
           fi
-          echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
-          echo "- Image: \`${TAG}\` (${ENV_NAME})" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: aws-actions/configure-aws-credentials@v6
-        if: inputs.action == 'deploy'
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
 
       - name: Deploy via SSM + health check
-        if: inputs.action == 'deploy'
         env:
           CF_ORIGIN_SECRET: ${{ secrets.CF_ORIGIN_SECRET }}
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
@@ -338,6 +321,7 @@ jobs:
           CONTAINER_NAME="${APP_NAME}-${ENV_NAME}"
           FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
           cat > /tmp/d.sh <<EOF
+          API_BASE_URL='$API_BASE_URL'
           CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
           CONTAINER_MEMORY='$CONTAINER_MEMORY'
           CONTAINER_NAME='$CONTAINER_NAME'
@@ -360,6 +344,7 @@ jobs:
             docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
             docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
               --memory "$CONTAINER_MEMORY" \
+              -e API_BASE_URL="$API_BASE_URL" \
               --label "traefik.enable=true" \
               --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
               --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
@@ -390,9 +375,9 @@ jobs:
             docker rmi "$FULL_IMAGE" 2>/dev/null || true
             exit 1
           fi
-          # dev and qa share this host and image repo: prune only this env's tags.
-          echo "--- Pruning ${ENV_NAME} images (keep current + previous) ---"
-          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | grep -F ":${ENV_NAME}-" | while read -r i; do
+          # dev and qa share this host and these tags; `docker rmi` without -f can't remove the other env's running image.
+          echo "--- Pruning (keep current + previous) ---"
+          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | while read -r i; do
             [ "$i" = "$FULL_IMAGE" ] || [ "$i" = "$PREV_IMAGE" ] || docker rmi "$i" >/dev/null 2>&1 || true
           done
           echo "--- Deployed ${FULL_IMAGE} ---"
@@ -426,9 +411,22 @@ jobs:
             echo "::error::SSM deploy ended with status $STATUS"; exit 1
           fi
 
+      # CloudFront caches the HTML (Next sends s-maxage=31536000); without this, old HTML pointing at
+      # deleted chunks keeps being served after a deploy.
+      - name: Invalidate CloudFront cache
+        env:
+          CF_DISTRIBUTION_ID: ${{ vars.CF_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CF_DISTRIBUTION_ID" ]; then
+            echo "::warning:: CF_DISTRIBUTION_ID not set for '${ENV_NAME}' — skipped CloudFront invalidation"
+            exit 0
+          fi
+          aws cloudfront create-invalidation --distribution-id "$CF_DISTRIBUTION_ID" --paths "/*"
+
       # curl instead of a third-party action: the bot token never leaves this step.
-      - name: Summary & Telegram (${{ matrix.env }})
-        if: always() && inputs.action == 'deploy'
+      - name: Summary & Telegram (dev)
+        if: always()
         continue-on-error: true
         env:
           ACTOR: ${{ github.actor }}
@@ -440,15 +438,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           set -uo pipefail
-          if [ "$MODE" = image ]; then
-            BRANCH=${RESTORED_BRANCH:-n/a}
-            SHORT_SHA=${RESTORED_SHA:-n/a}
-            MESSAGE=${RESTORED_MESSAGE:-$MESSAGE}
-          fi
           # Backticks would break Telegram Markdown; free text goes inside code spans.
           MG=${MESSAGE//\`/\'}
-          if [ "$JOB_STATUS" = success ] && [ "$MODE" = image ]; then HEAD='⏪ *Rollback Successful*'
-          elif [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
+          if [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
           elif [ -n "${ROLLED_BACK_TO:-}" ]; then HEAD='❌ *Deployment Failed / Rolled Back*'
           else HEAD='❌ *Deployment Failed*'
           fi
@@ -456,9 +448,406 @@ jobs:
           L=("$HEAD" ""
             "🔧 *Service:*  \`${SERVICE_NAME}\`"
             "🌍 *Environment:*  \`${ENV_NAME^^}\`"
+            "⚙️ *Action:*  \`deploy\`"
             "👤 *By:*  \`${ACTOR}\`"
             "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
-          L+=("🐳 *Image:*  \`${IMAGE_TAG:-n/a}\`")
+          L+=("🐳 *Image:*  \`${DOCKER_IMAGE}:${IMAGE_TAG}\`")
+          if [ -n "$PUBLIC_HOST" ]; then L+=("🌐 *Site:*  https://${PUBLIC_HOST}"); fi
+          L+=("💬 *Message:*  \`${MG}\`")
+          if [ "$JOB_STATUS" = success ] && [ -n "${PREV_TAG:-}" ]; then
+            L+=("↩️ *Rollback:*  \`build_tag=${PREV_TAG}\`")
+          fi
+
+          printf '%s  \n' "${L[@]}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::warning:: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — skipped notify"
+            exit 0
+          fi
+          curl -sS --fail -o /dev/null "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=$(printf '%s\n' "${L[@]}")" \
+            -d parse_mode=Markdown -d disable_web_page_preview=true
+
+  deploy-qa:
+    name: Deploy → QA
+    runs-on: ubuntu-latest
+    needs: [release, deploy-dev]
+    if: |
+      !cancelled() && needs.release.result == 'success' &&
+      inputs.action == 'deploy' && inputs.qa &&
+      (inputs.dev == false || needs.deploy-dev.result == 'success')
+    environment: qa
+    concurrency:
+      group: ec2-${{ github.repository }}-qa
+      cancel-in-progress: false
+    env:
+      ENV_NAME: qa
+      API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
+      MODE: ${{ needs.release.outputs.mode }}
+      PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+    steps:
+      - name: Check qa deploy config
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          CF_ORIGIN_SECRET: ${{ secrets.CF_ORIGIN_SECRET }}
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          if [ -z "$API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
+          if [ -z "$PUBLIC_HOST" ]; then MISSING+=(PUBLIC_HOST); fi
+          if [ -z "$EC2_INSTANCE_ID" ]; then MISSING+=("EC2_INSTANCE_ID (secret)"); fi
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then MISSING+=("AWS_ACCESS_KEY_ID (secret)"); fi
+          if [ -z "$CF_ORIGIN_SECRET" ]; then MISSING+=("CF_ORIGIN_SECRET (secret)"); fi
+          if [ "${#MISSING[@]}" -gt 0 ]; then
+            echo "::error:: GitHub Environment '${ENV_NAME}' is missing: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Deploy via SSM + health check
+        env:
+          CF_ORIGIN_SECRET: ${{ secrets.CF_ORIGIN_SECRET }}
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          CONTAINER_NAME="${APP_NAME}-${ENV_NAME}"
+          FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
+          cat > /tmp/d.sh <<EOF
+          API_BASE_URL='$API_BASE_URL'
+          CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
+          CONTAINER_MEMORY='$CONTAINER_MEMORY'
+          CONTAINER_NAME='$CONTAINER_NAME'
+          CONTAINER_PORT='$CONTAINER_PORT'
+          DOCKER_IMAGE='$DOCKER_IMAGE'
+          ENV_NAME='$ENV_NAME'
+          FULL_IMAGE='$FULL_IMAGE'
+          HEALTH_PATH='$HEALTH_PATH'
+          PUBLIC_HOST='$PUBLIC_HOST'
+          TRAEFIK_NETWORK='$TRAEFIK_NETWORK'
+          EOF
+          cat >> /tmp/d.sh <<'EOF'
+          set -eu
+          echo "--- Pulling ${FULL_IMAGE} ---"
+          docker pull "$FULL_IMAGE"
+          PREV_IMAGE=$(docker inspect --format='{{.Config.Image}}' "$CONTAINER_NAME" 2>/dev/null || echo "")
+          echo "PREV_IMAGE=${PREV_IMAGE}"
+
+          run_container() {
+            docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+            docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
+              --memory "$CONTAINER_MEMORY" \
+              -e API_BASE_URL="$API_BASE_URL" \
+              --label "traefik.enable=true" \
+              --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
+              --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
+              --label "traefik.http.routers.${CONTAINER_NAME}.tls.certresolver=letsencrypt" \
+              --label "traefik.http.services.${CONTAINER_NAME}.loadbalancer.server.port=${CONTAINER_PORT}" \
+              "$1"
+          }
+          run_container "$FULL_IMAGE"
+          echo "--- Health check (5s grace + 10 * 2s) ---"
+          sleep 5
+          HEALTHY=false
+          for i in $(seq 1 10); do
+            if docker exec "$CONTAINER_NAME" wget -q -T 5 -O /dev/null "http://127.0.0.1:${CONTAINER_PORT}${HEALTH_PATH}" 2>/dev/null; then
+              HEALTHY=true; echo "  $i/10 OK"; break
+            fi
+            echo "  $i/10 not ready"; sleep 2
+          done
+
+          if [ "$HEALTHY" = "false" ]; then
+            echo "HEALTH CHECK FAILED"
+            docker logs "$CONTAINER_NAME" 2>&1 | tail -80 || true
+            if [ -n "$PREV_IMAGE" ]; then
+              echo "Rolling back to $PREV_IMAGE"
+              if docker pull "$PREV_IMAGE" && run_container "$PREV_IMAGE"; then echo "ROLLED_BACK_TO=${PREV_IMAGE}"; fi
+            else
+              echo "No previous image — service is down"
+            fi
+            docker rmi "$FULL_IMAGE" 2>/dev/null || true
+            exit 1
+          fi
+          # dev and qa share this host and these tags; `docker rmi` without -f can't remove the other env's running image.
+          echo "--- Pruning (keep current + previous) ---"
+          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | while read -r i; do
+            [ "$i" = "$FULL_IMAGE" ] || [ "$i" = "$PREV_IMAGE" ] || docker rmi "$i" >/dev/null 2>&1 || true
+          done
+          echo "--- Deployed ${FULL_IMAGE} ---"
+          EOF
+          CID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript --comment "Deploy $CONTAINER_NAME" \
+            --parameters commands="echo $(base64 -w0 </tmp/d.sh) | base64 -d | bash" \
+            --query Command.CommandId --output text)
+          echo "SSM command $CID -> $INSTANCE_ID"
+          STATUS=Pending
+          for _ in $(seq 1 120); do
+            sleep 5
+            STATUS=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+          done
+          OUT=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text || true)
+          printf '%s\n' "$OUT"
+
+          PREV_IMAGE=$(printf '%s\n' "$OUT" | sed -n 's/^PREV_IMAGE=//p' | head -1)
+          ROLLED_BACK_TO=$(printf '%s\n' "$OUT" | sed -n 's/^ROLLED_BACK_TO=//p' | head -1)
+          if [ -n "$PREV_IMAGE" ] && [ "$PREV_IMAGE" != "$FULL_IMAGE" ]; then
+            echo "PREV_TAG=${PREV_IMAGE##*:}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$ROLLED_BACK_TO" ]; then echo "ROLLED_BACK_TO=${ROLLED_BACK_TO##*:}" >> "$GITHUB_ENV"; fi
+
+          if [ "$STATUS" != Success ]; then
+            aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+              --query StandardErrorContent --output text || true
+            echo "::error::SSM deploy ended with status $STATUS"; exit 1
+          fi
+
+      # CloudFront caches the HTML (Next sends s-maxage=31536000); without this, old HTML pointing at
+      # deleted chunks keeps being served after a deploy.
+      - name: Invalidate CloudFront cache
+        env:
+          CF_DISTRIBUTION_ID: ${{ vars.CF_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CF_DISTRIBUTION_ID" ]; then
+            echo "::warning:: CF_DISTRIBUTION_ID not set for '${ENV_NAME}' — skipped CloudFront invalidation"
+            exit 0
+          fi
+          aws cloudfront create-invalidation --distribution-id "$CF_DISTRIBUTION_ID" --paths "/*"
+
+      # curl instead of a third-party action: the bot token never leaves this step.
+      - name: Summary & Telegram (qa)
+        if: always()
+        continue-on-error: true
+        env:
+          ACTOR: ${{ github.actor }}
+          BRANCH: ${{ needs.release.outputs.branch }}
+          JOB_STATUS: ${{ job.status }}
+          MESSAGE: ${{ needs.release.outputs.message }}
+          SHORT_SHA: ${{ needs.release.outputs.short_sha }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -uo pipefail
+          # Backticks would break Telegram Markdown; free text goes inside code spans.
+          MG=${MESSAGE//\`/\'}
+          if [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
+          elif [ -n "${ROLLED_BACK_TO:-}" ]; then HEAD='❌ *Deployment Failed / Rolled Back*'
+          else HEAD='❌ *Deployment Failed*'
+          fi
+
+          L=("$HEAD" ""
+            "🔧 *Service:*  \`${SERVICE_NAME}\`"
+            "🌍 *Environment:*  \`${ENV_NAME^^}\`"
+            "⚙️ *Action:*  \`deploy\`"
+            "👤 *By:*  \`${ACTOR}\`"
+            "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
+          L+=("🐳 *Image:*  \`${DOCKER_IMAGE}:${IMAGE_TAG}\`")
+          if [ -n "$PUBLIC_HOST" ]; then L+=("🌐 *Site:*  https://${PUBLIC_HOST}"); fi
+          L+=("💬 *Message:*  \`${MG}\`")
+          if [ "$JOB_STATUS" = success ] && [ -n "${PREV_TAG:-}" ]; then
+            L+=("↩️ *Rollback:*  \`build_tag=${PREV_TAG}\`")
+          fi
+
+          printf '%s  \n' "${L[@]}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::warning:: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — skipped notify"
+            exit 0
+          fi
+          curl -sS --fail -o /dev/null "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=$(printf '%s\n' "${L[@]}")" \
+            -d parse_mode=Markdown -d disable_web_page_preview=true
+
+  deploy-prod:
+    name: Deploy → PROD
+    runs-on: ubuntu-latest
+    needs: release
+    if: |
+      inputs.action == 'deploy' && inputs.prod
+    environment: prod
+    concurrency:
+      group: ec2-${{ github.repository }}-prod
+      cancel-in-progress: false
+    env:
+      ENV_NAME: prod
+      API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
+      MODE: ${{ needs.release.outputs.mode }}
+      PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+    steps:
+      - name: Check prod deploy config
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          CF_ORIGIN_SECRET: ${{ secrets.CF_ORIGIN_SECRET }}
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          if [ -z "$API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
+          if [ -z "$PUBLIC_HOST" ]; then MISSING+=(PUBLIC_HOST); fi
+          if [ -z "$EC2_INSTANCE_ID" ]; then MISSING+=("EC2_INSTANCE_ID (secret)"); fi
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then MISSING+=("AWS_ACCESS_KEY_ID (secret)"); fi
+          if [ -z "$CF_ORIGIN_SECRET" ]; then MISSING+=("CF_ORIGIN_SECRET (secret)"); fi
+          if [ "${#MISSING[@]}" -gt 0 ]; then
+            echo "::error:: GitHub Environment '${ENV_NAME}' is missing: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Deploy via SSM + health check
+        env:
+          CF_ORIGIN_SECRET: ${{ secrets.CF_ORIGIN_SECRET }}
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          CONTAINER_NAME="${APP_NAME}-${ENV_NAME}"
+          FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
+          cat > /tmp/d.sh <<EOF
+          API_BASE_URL='$API_BASE_URL'
+          CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
+          CONTAINER_MEMORY='$CONTAINER_MEMORY'
+          CONTAINER_NAME='$CONTAINER_NAME'
+          CONTAINER_PORT='$CONTAINER_PORT'
+          DOCKER_IMAGE='$DOCKER_IMAGE'
+          ENV_NAME='$ENV_NAME'
+          FULL_IMAGE='$FULL_IMAGE'
+          HEALTH_PATH='$HEALTH_PATH'
+          PUBLIC_HOST='$PUBLIC_HOST'
+          TRAEFIK_NETWORK='$TRAEFIK_NETWORK'
+          EOF
+          cat >> /tmp/d.sh <<'EOF'
+          set -eu
+          echo "--- Pulling ${FULL_IMAGE} ---"
+          docker pull "$FULL_IMAGE"
+          PREV_IMAGE=$(docker inspect --format='{{.Config.Image}}' "$CONTAINER_NAME" 2>/dev/null || echo "")
+          echo "PREV_IMAGE=${PREV_IMAGE}"
+
+          run_container() {
+            docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+            docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
+              --memory "$CONTAINER_MEMORY" \
+              -e API_BASE_URL="$API_BASE_URL" \
+              --label "traefik.enable=true" \
+              --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
+              --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
+              --label "traefik.http.routers.${CONTAINER_NAME}.tls.certresolver=letsencrypt" \
+              --label "traefik.http.services.${CONTAINER_NAME}.loadbalancer.server.port=${CONTAINER_PORT}" \
+              "$1"
+          }
+          run_container "$FULL_IMAGE"
+          echo "--- Health check (5s grace + 10 * 2s) ---"
+          sleep 5
+          HEALTHY=false
+          for i in $(seq 1 10); do
+            if docker exec "$CONTAINER_NAME" wget -q -T 5 -O /dev/null "http://127.0.0.1:${CONTAINER_PORT}${HEALTH_PATH}" 2>/dev/null; then
+              HEALTHY=true; echo "  $i/10 OK"; break
+            fi
+            echo "  $i/10 not ready"; sleep 2
+          done
+
+          if [ "$HEALTHY" = "false" ]; then
+            echo "HEALTH CHECK FAILED"
+            docker logs "$CONTAINER_NAME" 2>&1 | tail -80 || true
+            if [ -n "$PREV_IMAGE" ]; then
+              echo "Rolling back to $PREV_IMAGE"
+              if docker pull "$PREV_IMAGE" && run_container "$PREV_IMAGE"; then echo "ROLLED_BACK_TO=${PREV_IMAGE}"; fi
+            else
+              echo "No previous image — service is down"
+            fi
+            docker rmi "$FULL_IMAGE" 2>/dev/null || true
+            exit 1
+          fi
+          # dev and qa share this host and these tags; `docker rmi` without -f can't remove the other env's running image.
+          echo "--- Pruning (keep current + previous) ---"
+          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | while read -r i; do
+            [ "$i" = "$FULL_IMAGE" ] || [ "$i" = "$PREV_IMAGE" ] || docker rmi "$i" >/dev/null 2>&1 || true
+          done
+          echo "--- Deployed ${FULL_IMAGE} ---"
+          EOF
+          CID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript --comment "Deploy $CONTAINER_NAME" \
+            --parameters commands="echo $(base64 -w0 </tmp/d.sh) | base64 -d | bash" \
+            --query Command.CommandId --output text)
+          echo "SSM command $CID -> $INSTANCE_ID"
+          STATUS=Pending
+          for _ in $(seq 1 120); do
+            sleep 5
+            STATUS=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+          done
+          OUT=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text || true)
+          printf '%s\n' "$OUT"
+
+          PREV_IMAGE=$(printf '%s\n' "$OUT" | sed -n 's/^PREV_IMAGE=//p' | head -1)
+          ROLLED_BACK_TO=$(printf '%s\n' "$OUT" | sed -n 's/^ROLLED_BACK_TO=//p' | head -1)
+          if [ -n "$PREV_IMAGE" ] && [ "$PREV_IMAGE" != "$FULL_IMAGE" ]; then
+            echo "PREV_TAG=${PREV_IMAGE##*:}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$ROLLED_BACK_TO" ]; then echo "ROLLED_BACK_TO=${ROLLED_BACK_TO##*:}" >> "$GITHUB_ENV"; fi
+
+          if [ "$STATUS" != Success ]; then
+            aws ssm get-command-invocation --command-id "$CID" --instance-id "$INSTANCE_ID" \
+              --query StandardErrorContent --output text || true
+            echo "::error::SSM deploy ended with status $STATUS"; exit 1
+          fi
+
+      # CloudFront caches the HTML (Next sends s-maxage=31536000); without this, old HTML pointing at
+      # deleted chunks keeps being served after a deploy.
+      - name: Invalidate CloudFront cache
+        env:
+          CF_DISTRIBUTION_ID: ${{ vars.CF_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CF_DISTRIBUTION_ID" ]; then
+            echo "::warning:: CF_DISTRIBUTION_ID not set for '${ENV_NAME}' — skipped CloudFront invalidation"
+            exit 0
+          fi
+          aws cloudfront create-invalidation --distribution-id "$CF_DISTRIBUTION_ID" --paths "/*"
+
+      # curl instead of a third-party action: the bot token never leaves this step.
+      - name: Summary & Telegram (prod)
+        if: always()
+        continue-on-error: true
+        env:
+          ACTOR: ${{ github.actor }}
+          BRANCH: ${{ needs.release.outputs.branch }}
+          JOB_STATUS: ${{ job.status }}
+          MESSAGE: ${{ needs.release.outputs.message }}
+          SHORT_SHA: ${{ needs.release.outputs.short_sha }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -uo pipefail
+          # Backticks would break Telegram Markdown; free text goes inside code spans.
+          MG=${MESSAGE//\`/\'}
+          if [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
+          elif [ -n "${ROLLED_BACK_TO:-}" ]; then HEAD='❌ *Deployment Failed / Rolled Back*'
+          else HEAD='❌ *Deployment Failed*'
+          fi
+
+          L=("$HEAD" ""
+            "🔧 *Service:*  \`${SERVICE_NAME}\`"
+            "🌍 *Environment:*  \`${ENV_NAME^^}\`"
+            "⚙️ *Action:*  \`deploy\`"
+            "👤 *By:*  \`${ACTOR}\`"
+            "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
+          L+=("🐳 *Image:*  \`${DOCKER_IMAGE}:${IMAGE_TAG}\`")
           if [ -n "$PUBLIC_HOST" ]; then L+=("🌐 *Site:*  https://${PUBLIC_HOST}"); fi
           L+=("💬 *Message:*  \`${MG}\`")
           if [ "$JOB_STATUS" = success ] && [ -n "${PREV_TAG:-}" ]; then

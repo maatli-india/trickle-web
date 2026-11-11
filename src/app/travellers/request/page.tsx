@@ -155,6 +155,16 @@ export default function TravellerRequestPage() {
       .finally(() => setExistingRequestChecked(true));
   }, [selection?.traveller.id, selection?.traveller.travelPlanId]);
 
+  // Auto-select when there's exactly one option — no point making the user click.
+  // Must stay above the loading/no-selection early returns (Rules of Hooks).
+  useEffect(() => {
+    if (!selection) return;
+    const pickupOptions = getHandoverOptions(selection.traveller, "pickupHandovers", "pickupHandover", PICKUP_HANDOVER_OPTIONS);
+    const deliveryOptions = getHandoverOptions(selection.traveller, "deliveryHandovers", "deliveryHandover", DELIVERY_HANDOVER_OPTIONS);
+    if (pickupOptions.length === 1) setPickup((current) => current ?? pickupOptions[0].key);
+    if (deliveryOptions.length === 1) setDelivery((current) => current ?? deliveryOptions[0].key);
+  }, [selection]);
+
   const joinWaitlist = async () => {
     const travelPlanId = selection?.traveller.travelPlanId || selection?.traveller.id;
     if (!travelPlanId || registering) return;
@@ -223,13 +233,6 @@ export default function TravellerRequestPage() {
   const completedTrips = traveller.user?.completedTrips ?? traveller.user?.totalCount ?? traveller.user?.trips ?? traveller.completedTrips ?? traveller.totalCount ?? traveller.trips ?? 0;
   const pickupOptions = getHandoverOptions(traveller, "pickupHandovers", "pickupHandover", PICKUP_HANDOVER_OPTIONS);
   const deliveryOptions = getHandoverOptions(traveller, "deliveryHandovers", "deliveryHandover", DELIVERY_HANDOVER_OPTIONS);
-
-  // Auto-select when there's exactly one option — no point making the user click.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (pickupOptions.length === 1 && !pickup) setPickup(pickupOptions[0].key);
-    if (deliveryOptions.length === 1 && !delivery) setDelivery(deliveryOptions[0].key);
-  }, [selection]);
 
   const maxWeight = traveller.maxWeightKg || 20;
   const maxPackages = traveller.maxParcelCount || 5;

@@ -13,8 +13,9 @@ DockerHub, then AWS SSM Run Command starts it on the env's EC2 behind Traefik �
 | qa | dev/qa instance (same as dev) | `trickle-web-qa` | `user-qa.trickle.org.in` |
 | prod | prod instance | `trickle-web-prod` | `trickle.org.in` |
 
-Image: `<DOCKERHUB_USERNAME>/trickle-web`, tag `<env>-YYYYMMDD_hhmm.N` (IST). One image per env: the API host is
-baked in at build time.
+Image: `<DOCKERHUB_USERNAME>/trickle-web`, tag `YYYYMMDD_hhmm.N` (IST) — same format as the API. **One image for every
+env:** it is built with a placeholder API host, and the container swaps in that env's `NEXT_PUBLIC_API_BASE_URL`
+(passed as `API_BASE_URL`) at start. A dev image can go to qa/prod unchanged.
 
 ## One-time EC2 setup (per instance)
 
@@ -47,9 +48,10 @@ until the certificate is issued.
 |---|---|---|---|
 | Variable | `NEXT_PUBLIC_API_BASE_URL` | yes | `https://api-dev.trickle.org.in/trickle` — no `/v1`, no trailing `/` |
 | Variable | `PUBLIC_HOST` | deploy | `user-dev.trickle.org.in` — Traefik `Host` rule, no `https://` |
+| Variable | `CF_DISTRIBUTION_ID` | no | CloudFront distribution in front of this env, e.g. `E1ABCDEF2GHIJK` — invalidates `/*` after each deploy; empty = warning, no invalidation |
 | Secret | `EC2_INSTANCE_ID` | deploy | `i-0abc…` — dev and qa: the dev/qa instance; prod: the prod instance |
 
-`NEXT_PUBLIC_API_BASE_URL` is the same key as trickle-dash. It is baked in at build time; Google Places goes through
+`NEXT_PUBLIC_API_BASE_URL` is the same key as trickle-dash. Read at deploy time and passed to the container; Google Places goes through
 this backend, so the web needs no Google key. Missing required keys fail the run before anything is built.
 
 ## Secrets (repo level, or per env to override)
@@ -72,26 +74,29 @@ this backend, so the web needs no Google key. Missing required keys fail the run
 
 | action | build_tag | What runs |
 |---|---|---|
-| `deploy` | empty | Build the selected branch with that env's vars → push image → run it on EC2 |
-| `deploy` | git commit SHA, e.g. `c290d6e` | Check out that commit, build it fresh with the env's **current** vars → push → run |
-| `deploy` | image tag, e.g. `dev-20261110_2005.1` | No build — run that existing image again (seconds) |
-| `build` (dev/qa only) | empty / git SHA | Build + push the image only; nothing changes on EC2. Deploy it later by its tag |
+| `deploy` | empty | Build the selected branch → push image → run it on the ticked envs (dev/qa) |
+| `deploy` | git commit SHA, e.g. `c290d6e` | Check out that commit, build it → push → run on the ticked envs (dev/qa) |
+| `deploy` | image tag, e.g. `20261111_1635.2` | No build — run that existing image on any ticked env, incl. PROD |
+| `build` | empty / git SHA | Build + push the image only; nothing changes on EC2. Deploy it later by its tag |
 
-Detection rule: `<env>-YYYYMMDD_hhmm.N` = image tag, any other 7–40 hex = git SHA, anything else fails.
-Use the full 40-char SHA to avoid ambiguity. An image tag needs `action=deploy` and exactly its own env ticked.
+Detection rule: `YYYYMMDD_hhmm.N` = image tag, any other 7–40 hex = git SHA, anything else fails.
+Use the full 40-char SHA to avoid ambiguity. An image tag needs `action=deploy`.
 
-Only the ticked envs run. Allowed: `dev`, `qa`, `dev+qa` (dev first; qa is skipped if dev fails), `prod`.
-**PROD always runs alone** and only with `action=deploy`: it builds for prod and deploys (or redeploys a `prod-…` tag).
+Same rules as the API workflow: any mix of `dev` / `qa` / `prod` (qa waits for dev and is skipped if dev fails).
+**PROD only takes an existing image tag** — no fresh builds; promote the image tested on dev/qa.
+
+Jobs (same as the API workflow): `release` (validate, build + push the image; no build for an image tag) →
+`deploy-dev` / `deploy-qa` / `deploy-prod` (deploy only). **Re-run failed jobs** on a failed deploy redeploys
+the same image — it does not rebuild.
 
 Each deploy is health-checked inside the container (`GET http://127.0.0.1:3000/` must succeed; 5 s + 10 × 2 s).
 On failure the previous image is started again and the run fails. The host keeps the current and previous image per env.
 
-Telegram always shows the branch, SHA and message of the code that went live — on an image-tag rollback that is the
+Telegram always shows the branch, SHA and message of the code that went live — on an image-tag deploy that is the
 image's own, not the selected branch's latest commit.
 
 ## Rollback
 
 1. **By image tag (fast, exact):** copy `Rollback: build_tag=…` from the Telegram message or run summary →
-   Run workflow with `action=deploy`, tick **that** env, `build_tag=<tag>`. A `dev-…` tag can't go to prod
-   (the dev API host is baked in).
-2. **By git SHA:** `build_tag=<sha>` rebuilds old code with today's env vars (use when the API host changed).
+   Run workflow with `action=deploy`, tick **that** env, `build_tag=<tag>`.
+2. **By git SHA:** `build_tag=<sha>` rebuilds old code (dev/qa only).
