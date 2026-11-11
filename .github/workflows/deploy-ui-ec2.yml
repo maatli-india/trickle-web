@@ -1,9 +1,10 @@
 # UI service — Build & Deploy to EC2 via AWS SSM Run Command (no SSH; websites-only EC2 box behind CloudFront).
 #
-# Same layout as the API workflow: `release` validates, resolves branch/sha/message and builds + pushes one
-# image per ticked env (NEXT_PUBLIC_API_BASE_URL is baked in at build time, so every image belongs to one env —
-# tag prefix); no build when build_tag is an image tag. `deploy-dev` / `deploy-qa` / `deploy-prod` only deploy.
-# Re-run failed jobs re-runs only the failed deploy with the same image.
+# Same layout as the API workflow: `release` validates, resolves branch/sha/message and builds + pushes ONE image
+# (tag YYYYMMDD_hhmm.N) that runs in every env; no build when build_tag is an image tag.
+# `deploy-dev` / `deploy-qa` / `deploy-prod` only deploy, passing that Environment's NEXT_PUBLIC_API_BASE_URL to the
+# container as API_BASE_URL. The image is built with a placeholder API host that the container swaps at start
+# (see Dockerfile), so a dev image can go to qa/prod as is. Re-run failed jobs redeploys the same image.
 # `next build` runs natively on the x64 runner; the arm64 image only copies its standalone output,
 # so nothing runs under QEMU emulation.
 #
@@ -27,11 +28,11 @@ on:
         type: boolean
         default: false
       prod:
-        description: "PROD (alone, deploy only)"
+        description: "PROD (existing image tag only)"
         type: boolean
         default: false
       build_tag:
-        description: "Empty = selected branch · git SHA (7–40 hex) = that commit · image tag (<env>-YYYYMMDD_hhmm.N) = deploy that image, no build"
+        description: "Empty = selected branch · git SHA (7–40 hex) = that commit · image tag (YYYYMMDD_hhmm.N) = deploy that image, no build (PROD needs one)"
         type: string
         required: false
         default: ""
@@ -63,6 +64,7 @@ jobs:
     outputs:
       branch: ${{ steps.meta.outputs.branch }}
       envs: ${{ steps.validate.outputs.envs }}
+      image_tag: ${{ steps.validate.outputs.mode == 'image' && steps.validate.outputs.tag || steps.suffix.outputs.suffix }}
       message: ${{ steps.meta.outputs.message }}
       mode: ${{ steps.validate.outputs.mode }}
       sha: ${{ steps.meta.outputs.sha }}
@@ -84,37 +86,31 @@ jobs:
           if [ "$DEV" = true ]; then ENVS+=(dev); fi
           if [ "$QA" = true ]; then ENVS+=(qa); fi
           if [ "$PROD" = true ]; then ENVS+=(prod); fi
-          # Build too: the API host is baked into the image, so each build targets one env.
-          if [ "${#ENVS[@]}" -eq 0 ]; then
-            echo "::error:: No environment selected for ${ACTION}"
-            exit 1
-          fi
-          # PROD always builds and deploys in its own run: never build-only, never batched with dev/qa.
-          if [ "$PROD" = true ] && [ "${#ENVS[@]}" -gt 1 ]; then
-            echo "::error:: PROD deploys alone — untick dev/qa"
-            exit 1
-          fi
-          if [ "$PROD" = true ] && [ "$ACTION" = build ]; then
-            echo "::error:: PROD has no build-only run — use action=deploy"
+          if [ "$ACTION" = deploy ] && [ "${#ENVS[@]}" -eq 0 ]; then
+            echo "::error:: No environment selected for deploy"
             exit 1
           fi
 
-          # Image tags are "<env>-YYYYMMDD_hhmm.N"; any other 7–40 hex string is treated as a git SHA.
+          # Image tags are "YYYYMMDD_hhmm.N"; any other 7–40 hex string is treated as a git SHA.
           TAG=$(printf '%s' "$BUILD_TAG" | tr -d '[:space:]')
           if [ -z "$TAG" ]; then
             MODE=source
-          elif [[ "$TAG" =~ ^(dev|qa|prod)-[0-9]{8}_[0-9]{4}\.[0-9]+$ ]]; then
+          elif [[ "$TAG" =~ ^[0-9]{8}_[0-9]{4}\.[0-9]+$ ]]; then
             MODE=image
-            # An image only works on the env whose API host it was built with.
-            if [ "$ACTION" != deploy ] || [ "${#ENVS[@]}" -ne 1 ] || [ "${ENVS[0]}" != "${BASH_REMATCH[1]}" ]; then
-              echo "::error:: Image ${TAG} needs action=deploy and only the ${BASH_REMATCH[1]} env ticked"
+            if [ "$ACTION" != deploy ]; then
+              echo "::error:: An image tag needs action=deploy"
               exit 1
             fi
           elif [[ "${TAG,,}" =~ ^[0-9a-f]{7,40}$ ]]; then
             MODE=sha
             TAG=${TAG,,}
           else
-            echo "::error:: build_tag '${BUILD_TAG}' is neither an image tag (<env>-YYYYMMDD_hhmm.N) nor a git SHA (7–40 hex)"
+            echo "::error:: build_tag '${BUILD_TAG}' is neither an image tag (YYYYMMDD_hhmm.N) nor a git SHA (7–40 hex)"
+            exit 1
+          fi
+          # Same rule as the API workflow: PROD only gets an image already built and tested on dev/qa.
+          if [ "$PROD" = true ] && [ "$MODE" != image ]; then
+            echo "::error:: PROD deploys only an existing image tag (no fresh builds)"
             exit 1
           fi
 
@@ -157,7 +153,7 @@ jobs:
             BRANCH=$(echo "$LABELS" | jq -r '."deploy.branch" // "n/a"')
             SHA=$(echo "$LABELS" | jq -r '."deploy.sha" // "n/a"')
             MG=$(echo "$LABELS" | jq -r '."deploy.message" // empty')
-            MG=${MG:-${CUSTOM_MESSAGE:-Rollback to image ${TAG}}}
+            MG=${MG:-${CUSTOM_MESSAGE:-Deploy image ${TAG}}}
           else
             SHA="$GITHUB_SHA"
             if [ "$MODE" = sha ]; then
@@ -208,7 +204,7 @@ jobs:
           restore-keys: |
             ${{ env.APP_NAME }}-${{ steps.date.outputs.d }}-
 
-      - name: Generate image tag suffix (YYYYMMDD_hhmm.N)
+      - name: Generate image tag (YYYYMMDD_hhmm.N)
         if: steps.validate.outputs.mode != 'image'
         id: suffix
         run: |
@@ -252,47 +248,28 @@ jobs:
         if: steps.validate.outputs.mode != 'image'
         uses: docker/setup-buildx-action@v4
 
-      # This job has no GitHub Environment (Environment variables reach only jobs that reference one),
-      # so each env's API host comes from the repo variable NEXT_PUBLIC_API_BASE_URL_<ENV>.
-      - name: Build and push images (linux/arm64)
+      # Built once for every env: the API host is a placeholder the container replaces with API_BASE_URL at start.
+      - name: Build and push image (linux/arm64)
         if: steps.validate.outputs.mode != 'image'
         env:
           BRANCH: ${{ steps.meta.outputs.branch }}
-          ENVS: ${{ steps.validate.outputs.envs }}
+          IMAGE_TAG: ${{ steps.suffix.outputs.suffix }}
           MESSAGE: ${{ steps.meta.outputs.message }}
+          NEXT_PUBLIC_API_BASE_URL: https://api-base-url.placeholder.invalid
           SHA: ${{ steps.meta.outputs.sha }}
-          SUFFIX: ${{ steps.suffix.outputs.suffix }}
-          URL_DEV: ${{ vars.NEXT_PUBLIC_API_BASE_URL_DEV }}
-          URL_PROD: ${{ vars.NEXT_PUBLIC_API_BASE_URL_PROD }}
-          URL_QA: ${{ vars.NEXT_PUBLIC_API_BASE_URL_QA }}
         run: |
           set -euo pipefail
-          mapfile -t TARGETS < <(echo "$ENVS" | jq -r '.[]')
-          for E in "${TARGETS[@]}"; do
-            V="URL_${E^^}"
-            if [ -z "${!V}" ]; then
-              echo "::error:: Repo variable NEXT_PUBLIC_API_BASE_URL_${E^^} is not set"
-              exit 1
-            fi
-          done
-          for E in "${TARGETS[@]}"; do
-            V="URL_${E^^}"
-            IMAGE_TAG="${E}-${SUFFIX}"
-            echo "--- ${E}: next build (API ${!V}) ---"
-            # Drop the previous env's output so it can't end up in this env's image.
-            rm -rf .next/standalone .next/static
-            NEXT_PUBLIC_API_BASE_URL="${!V}" npm run build
-            if [ ! -f .next/standalone/server.js ]; then
-              echo '::error:: .next/standalone/server.js missing — next.config.ts needs output: "standalone"'
-              exit 1
-            fi
-            docker buildx build --platform linux/arm64 --push -f Dockerfile \
-              --label "deploy.branch=${BRANCH}" \
-              --label "deploy.sha=${SHA}" \
-              --label "deploy.message=${MESSAGE}" \
-              -t "${DOCKER_IMAGE}:${IMAGE_TAG}" .
-            echo "- Image: \`${IMAGE_TAG}\` (${E})" >> "$GITHUB_STEP_SUMMARY"
-          done
+          npm run build
+          if [ ! -f .next/standalone/server.js ]; then
+            echo '::error:: .next/standalone/server.js missing — next.config.ts needs output: "standalone"'
+            exit 1
+          fi
+          docker buildx build --platform linux/arm64 --push -f Dockerfile \
+            --label "deploy.branch=${BRANCH}" \
+            --label "deploy.sha=${SHA}" \
+            --label "deploy.message=${MESSAGE}" \
+            -t "${DOCKER_IMAGE}:${IMAGE_TAG}" .
+          echo "- Image: \`${DOCKER_IMAGE}:${IMAGE_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
 
   deploy-dev:
     name: Deploy → DEV
@@ -306,7 +283,8 @@ jobs:
       cancel-in-progress: false
     env:
       ENV_NAME: dev
-      IMAGE_TAG: ${{ needs.release.outputs.mode == 'image' && needs.release.outputs.tag || format('dev-{0}', needs.release.outputs.suffix) }}
+      API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
       MODE: ${{ needs.release.outputs.mode }}
       PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
     steps:
@@ -318,6 +296,7 @@ jobs:
         run: |
           set -euo pipefail
           MISSING=()
+          if [ -z "$API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
           if [ -z "$PUBLIC_HOST" ]; then MISSING+=(PUBLIC_HOST); fi
           if [ -z "$EC2_INSTANCE_ID" ]; then MISSING+=("EC2_INSTANCE_ID (secret)"); fi
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then MISSING+=("AWS_ACCESS_KEY_ID (secret)"); fi
@@ -342,6 +321,7 @@ jobs:
           CONTAINER_NAME="${APP_NAME}-${ENV_NAME}"
           FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
           cat > /tmp/d.sh <<EOF
+          API_BASE_URL='$API_BASE_URL'
           CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
           CONTAINER_MEMORY='$CONTAINER_MEMORY'
           CONTAINER_NAME='$CONTAINER_NAME'
@@ -364,6 +344,7 @@ jobs:
             docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
             docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
               --memory "$CONTAINER_MEMORY" \
+              -e API_BASE_URL="$API_BASE_URL" \
               --label "traefik.enable=true" \
               --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
               --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
@@ -394,9 +375,9 @@ jobs:
             docker rmi "$FULL_IMAGE" 2>/dev/null || true
             exit 1
           fi
-          # dev and qa share this host and image repo: prune only this env's tags.
-          echo "--- Pruning ${ENV_NAME} images (keep current + previous) ---"
-          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | grep -F ":${ENV_NAME}-" | while read -r i; do
+          # dev and qa share this host and these tags; `docker rmi` without -f can't remove the other env's running image.
+          echo "--- Pruning (keep current + previous) ---"
+          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | while read -r i; do
             [ "$i" = "$FULL_IMAGE" ] || [ "$i" = "$PREV_IMAGE" ] || docker rmi "$i" >/dev/null 2>&1 || true
           done
           echo "--- Deployed ${FULL_IMAGE} ---"
@@ -459,8 +440,7 @@ jobs:
           set -uo pipefail
           # Backticks would break Telegram Markdown; free text goes inside code spans.
           MG=${MESSAGE//\`/\'}
-          if [ "$JOB_STATUS" = success ] && [ "$MODE" = image ]; then HEAD='⏪ *Rollback Successful*'
-          elif [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
+          if [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
           elif [ -n "${ROLLED_BACK_TO:-}" ]; then HEAD='❌ *Deployment Failed / Rolled Back*'
           else HEAD='❌ *Deployment Failed*'
           fi
@@ -468,9 +448,10 @@ jobs:
           L=("$HEAD" ""
             "🔧 *Service:*  \`${SERVICE_NAME}\`"
             "🌍 *Environment:*  \`${ENV_NAME^^}\`"
+            "⚙️ *Action:*  \`deploy\`"
             "👤 *By:*  \`${ACTOR}\`"
             "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
-          L+=("🐳 *Image:*  \`${IMAGE_TAG:-n/a}\`")
+          L+=("🐳 *Image:*  \`${DOCKER_IMAGE}:${IMAGE_TAG}\`")
           if [ -n "$PUBLIC_HOST" ]; then L+=("🌐 *Site:*  https://${PUBLIC_HOST}"); fi
           L+=("💬 *Message:*  \`${MG}\`")
           if [ "$JOB_STATUS" = success ] && [ -n "${PREV_TAG:-}" ]; then
@@ -501,7 +482,8 @@ jobs:
       cancel-in-progress: false
     env:
       ENV_NAME: qa
-      IMAGE_TAG: ${{ needs.release.outputs.mode == 'image' && needs.release.outputs.tag || format('qa-{0}', needs.release.outputs.suffix) }}
+      API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
       MODE: ${{ needs.release.outputs.mode }}
       PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
     steps:
@@ -513,6 +495,7 @@ jobs:
         run: |
           set -euo pipefail
           MISSING=()
+          if [ -z "$API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
           if [ -z "$PUBLIC_HOST" ]; then MISSING+=(PUBLIC_HOST); fi
           if [ -z "$EC2_INSTANCE_ID" ]; then MISSING+=("EC2_INSTANCE_ID (secret)"); fi
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then MISSING+=("AWS_ACCESS_KEY_ID (secret)"); fi
@@ -537,6 +520,7 @@ jobs:
           CONTAINER_NAME="${APP_NAME}-${ENV_NAME}"
           FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
           cat > /tmp/d.sh <<EOF
+          API_BASE_URL='$API_BASE_URL'
           CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
           CONTAINER_MEMORY='$CONTAINER_MEMORY'
           CONTAINER_NAME='$CONTAINER_NAME'
@@ -559,6 +543,7 @@ jobs:
             docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
             docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
               --memory "$CONTAINER_MEMORY" \
+              -e API_BASE_URL="$API_BASE_URL" \
               --label "traefik.enable=true" \
               --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
               --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
@@ -589,9 +574,9 @@ jobs:
             docker rmi "$FULL_IMAGE" 2>/dev/null || true
             exit 1
           fi
-          # dev and qa share this host and image repo: prune only this env's tags.
-          echo "--- Pruning ${ENV_NAME} images (keep current + previous) ---"
-          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | grep -F ":${ENV_NAME}-" | while read -r i; do
+          # dev and qa share this host and these tags; `docker rmi` without -f can't remove the other env's running image.
+          echo "--- Pruning (keep current + previous) ---"
+          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | while read -r i; do
             [ "$i" = "$FULL_IMAGE" ] || [ "$i" = "$PREV_IMAGE" ] || docker rmi "$i" >/dev/null 2>&1 || true
           done
           echo "--- Deployed ${FULL_IMAGE} ---"
@@ -654,8 +639,7 @@ jobs:
           set -uo pipefail
           # Backticks would break Telegram Markdown; free text goes inside code spans.
           MG=${MESSAGE//\`/\'}
-          if [ "$JOB_STATUS" = success ] && [ "$MODE" = image ]; then HEAD='⏪ *Rollback Successful*'
-          elif [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
+          if [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
           elif [ -n "${ROLLED_BACK_TO:-}" ]; then HEAD='❌ *Deployment Failed / Rolled Back*'
           else HEAD='❌ *Deployment Failed*'
           fi
@@ -663,9 +647,10 @@ jobs:
           L=("$HEAD" ""
             "🔧 *Service:*  \`${SERVICE_NAME}\`"
             "🌍 *Environment:*  \`${ENV_NAME^^}\`"
+            "⚙️ *Action:*  \`deploy\`"
             "👤 *By:*  \`${ACTOR}\`"
             "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
-          L+=("🐳 *Image:*  \`${IMAGE_TAG:-n/a}\`")
+          L+=("🐳 *Image:*  \`${DOCKER_IMAGE}:${IMAGE_TAG}\`")
           if [ -n "$PUBLIC_HOST" ]; then L+=("🌐 *Site:*  https://${PUBLIC_HOST}"); fi
           L+=("💬 *Message:*  \`${MG}\`")
           if [ "$JOB_STATUS" = success ] && [ -n "${PREV_TAG:-}" ]; then
@@ -694,7 +679,8 @@ jobs:
       cancel-in-progress: false
     env:
       ENV_NAME: prod
-      IMAGE_TAG: ${{ needs.release.outputs.mode == 'image' && needs.release.outputs.tag || format('prod-{0}', needs.release.outputs.suffix) }}
+      API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
       MODE: ${{ needs.release.outputs.mode }}
       PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
     steps:
@@ -706,6 +692,7 @@ jobs:
         run: |
           set -euo pipefail
           MISSING=()
+          if [ -z "$API_BASE_URL" ]; then MISSING+=(NEXT_PUBLIC_API_BASE_URL); fi
           if [ -z "$PUBLIC_HOST" ]; then MISSING+=(PUBLIC_HOST); fi
           if [ -z "$EC2_INSTANCE_ID" ]; then MISSING+=("EC2_INSTANCE_ID (secret)"); fi
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then MISSING+=("AWS_ACCESS_KEY_ID (secret)"); fi
@@ -730,6 +717,7 @@ jobs:
           CONTAINER_NAME="${APP_NAME}-${ENV_NAME}"
           FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
           cat > /tmp/d.sh <<EOF
+          API_BASE_URL='$API_BASE_URL'
           CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
           CONTAINER_MEMORY='$CONTAINER_MEMORY'
           CONTAINER_NAME='$CONTAINER_NAME'
@@ -752,6 +740,7 @@ jobs:
             docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
             docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
               --memory "$CONTAINER_MEMORY" \
+              -e API_BASE_URL="$API_BASE_URL" \
               --label "traefik.enable=true" \
               --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
               --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
@@ -782,9 +771,9 @@ jobs:
             docker rmi "$FULL_IMAGE" 2>/dev/null || true
             exit 1
           fi
-          # dev and qa share this host and image repo: prune only this env's tags.
-          echo "--- Pruning ${ENV_NAME} images (keep current + previous) ---"
-          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | grep -F ":${ENV_NAME}-" | while read -r i; do
+          # dev and qa share this host and these tags; `docker rmi` without -f can't remove the other env's running image.
+          echo "--- Pruning (keep current + previous) ---"
+          docker images "$DOCKER_IMAGE" --format "{{.Repository}}:{{.Tag}}" | while read -r i; do
             [ "$i" = "$FULL_IMAGE" ] || [ "$i" = "$PREV_IMAGE" ] || docker rmi "$i" >/dev/null 2>&1 || true
           done
           echo "--- Deployed ${FULL_IMAGE} ---"
@@ -847,8 +836,7 @@ jobs:
           set -uo pipefail
           # Backticks would break Telegram Markdown; free text goes inside code spans.
           MG=${MESSAGE//\`/\'}
-          if [ "$JOB_STATUS" = success ] && [ "$MODE" = image ]; then HEAD='⏪ *Rollback Successful*'
-          elif [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
+          if [ "$JOB_STATUS" = success ]; then HEAD='✅ *Deployment Successful*'
           elif [ -n "${ROLLED_BACK_TO:-}" ]; then HEAD='❌ *Deployment Failed / Rolled Back*'
           else HEAD='❌ *Deployment Failed*'
           fi
@@ -856,9 +844,10 @@ jobs:
           L=("$HEAD" ""
             "🔧 *Service:*  \`${SERVICE_NAME}\`"
             "🌍 *Environment:*  \`${ENV_NAME^^}\`"
+            "⚙️ *Action:*  \`deploy\`"
             "👤 *By:*  \`${ACTOR}\`"
             "🌿 *Branch:*  \`${BRANCH}\` @ \`${SHORT_SHA}\`")
-          L+=("🐳 *Image:*  \`${IMAGE_TAG:-n/a}\`")
+          L+=("🐳 *Image:*  \`${DOCKER_IMAGE}:${IMAGE_TAG}\`")
           if [ -n "$PUBLIC_HOST" ]; then L+=("🌐 *Site:*  https://${PUBLIC_HOST}"); fi
           L+=("💬 *Message:*  \`${MG}\`")
           if [ "$JOB_STATUS" = success ] && [ -n "${PREV_TAG:-}" ]; then
