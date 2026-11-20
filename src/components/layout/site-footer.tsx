@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Mail, Smartphone } from "lucide-react";
 import { TrickleLogo } from "@/components/layout/trickle-logo";
+import { appStoreUrl, playStoreUrl } from "@/lib/app-links";
 
 type FooterLink = { label: string; href: string };
 
@@ -53,10 +54,25 @@ export function SiteFooter() {
             <p className="mt-4 text-sm leading-6">
               People-powered parcel delivery that follows the journey — matched with someone already going your way.
             </p>
-            <div className="mt-5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#a7a297]">
-              <Smartphone size={14} />
-              <span>iOS &amp; Android app — coming soon</span>
-            </div>
+            {appStoreUrl || playStoreUrl ? (
+              <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2 text-sm font-semibold text-[#183b3a]">
+                {playStoreUrl && (
+                  <a href={playStoreUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 transition hover:text-[#e85b43]">
+                    <Smartphone size={14} /> Google Play
+                  </a>
+                )}
+                {appStoreUrl && (
+                  <a href={appStoreUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 transition hover:text-[#e85b43]">
+                    <Smartphone size={14} /> App Store
+                  </a>
+                )}
+              </div>
+            ) : (
+              <div className="mt-5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#a7a297]">
+                <Smartphone size={14} />
+                <span>iOS &amp; Android app — coming soon</span>
+              </div>
+            )}
             <a href="mailto:support@trickle.org.in" className="mt-3 flex items-center gap-2 text-sm font-semibold text-[#183b3a] transition hover:text-[#e85b43]">
               <Mail size={14} />
               support@trickle.org.in

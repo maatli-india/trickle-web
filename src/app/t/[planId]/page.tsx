@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { AccountPage } from "@/components/account/account-page";
+import { StoreButtons } from "@/components/layout/store-buttons";
+import { appStoreUrl, playStoreUrl } from "@/lib/app-links";
 
 // Public landing page for a shared trip link (trickle-web/.../t/<planId>),
 // opened by whoever receives a "Share trip" message from the mobile app —
@@ -54,10 +56,17 @@ export default function TripShareLandingPage() {
             Open in Trickle app
           </a>
         )}
-        <p className="font-semibold text-[#183b3a]">
-          The Trickle app isn&apos;t available on the App Store or Google Play yet — we&apos;re
-          putting the finishing touches on it. Check back soon.
-        </p>
+        {appStoreUrl || playStoreUrl ? (
+          <>
+            <p className="font-semibold text-[#183b3a]">Don&apos;t have the app yet? Get it, then open this link again.</p>
+            <StoreButtons />
+          </>
+        ) : (
+          <p className="font-semibold text-[#183b3a]">
+            The Trickle app isn&apos;t available on the App Store or Google Play yet — we&apos;re
+            putting the finishing touches on it. Check back soon.
+          </p>
+        )}
       </div>
     </AccountPage>
   );
