@@ -23,6 +23,11 @@ import {
 
 const STEP_NAMES = ["Route & schedule", "Pickup & delivery", "What you carry", "Review & publish"];
 
+// Never offered as carryable; always sent as restricted.
+const ALWAYS_RESTRICTED = "illegal";
+const ACCEPTED_KEYS = new Set(ACCEPTED.map((item) => item.key));
+const CARRY_OPTIONS = [...ACCEPTED, ...RESTRICTED.filter((item) => item.key !== ALWAYS_RESTRICTED)];
+
 const toggleInSet = (set: Set<string>, key: string) => {
   const next = new Set(set);
   if (next.has(key)) next.delete(key);
@@ -74,8 +79,9 @@ function CreateTripContent() {
   const [arrival, setArrival] = useState("");
   const [pickup, setPickup] = useState<Set<string>>(new Set());
   const [delivery, setDelivery] = useState<Set<string>>(new Set());
-  const [accepted, setAccepted] = useState<Set<string>>(new Set(["documents"]));
-  const [restricted, setRestricted] = useState<Set<string>>(new Set());
+  // Everything starts as "won't carry": no category accepted, every restriction on.
+  const [accepted, setAccepted] = useState<Set<string>>(new Set());
+  const [restricted, setRestricted] = useState<Set<string>>(new Set(RESTRICTED.map((item) => item.key)));
   const [maxWeight, setMaxWeight] = useState("5");
   const [maxParcelCount, setMaxParcelCount] = useState("1");
   const [price, setPrice] = useState("");
@@ -102,7 +108,7 @@ function CreateTripContent() {
       setPickup(prefill.pickup);
       setDelivery(prefill.delivery);
       setAccepted(prefill.accepted);
-      setRestricted(prefill.restricted);
+      setRestricted(new Set([...prefill.restricted, ALWAYS_RESTRICTED]));
       setMaxWeight(prefill.maxWeight);
       setMaxParcelCount(prefill.maxParcelCount);
       setPrice(prefill.price);
@@ -142,6 +148,15 @@ function CreateTripContent() {
     };
   }, [price]);
 
+  const canCarryItem = (key: string) => (ACCEPTED_KEYS.has(key) ? accepted.has(key) : !restricted.has(key));
+  // A category is accepted when picked; a restriction is lifted when picked.
+  const toggleCarry = (key: string) => {
+    if (ACCEPTED_KEYS.has(key)) setAccepted((current) => toggleInSet(current, key));
+    else setRestricted((current) => toggleInSet(current, key));
+  };
+  const canCarry = CARRY_OPTIONS.filter((item) => canCarryItem(item.key));
+  const wontCarry = CARRY_OPTIONS.filter((item) => !canCarryItem(item.key));
+
   const validateStep = (index: number) => {
     if (index === 0) {
       if (!from.address.trim() || !from.lat || !to.address.trim() || !to.lat) {
@@ -156,13 +171,13 @@ function CreateTripContent() {
       return "";
     }
     if (index === 2) {
-      if (!accepted.size) return "Choose at least one category you can carry.";
+      if (!accepted.size) return "Tap at least one item type you can carry, e.g. Documents or Clothes.";
       const weight = Number(maxWeight);
       if (!Number.isFinite(weight) || weight < 1 || weight > 20) return "Max weight must be between 1 and 20 kg.";
       const count = Number(maxParcelCount);
       if (!Number.isInteger(count) || count < 1 || count > 20) return "Max parcels must be a whole number between 1 and 20.";
       const priceValue = Number(price);
-      if (!price || !Number.isFinite(priceValue) || priceValue <= 0) return "Set a price per package.";
+      if (!price || !Number.isFinite(priceValue) || priceValue <= 0) return "Set a price per kg.";
       return "";
     }
     return "";
@@ -204,7 +219,7 @@ function CreateTripContent() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
         maxWeightKg: Number(maxWeight),
         maxParcelCount: Number(maxParcelCount),
-        pricePerPackage: Number(price),
+        pricePerWeightKg: Number(price),
         acceptedParcelTypes: [...new Set(acceptedParcelCategories.map((key) => ACCEPTED_API_TYPES[key]).filter(Boolean))],
         acceptedParcelCategories,
         restrictedParcelTypes: [...restricted],
@@ -380,31 +395,28 @@ function CreateTripContent() {
             <div className="space-y-8">
               <div>
                 <p className={labelClass}>What you can carry</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {ACCEPTED.map((item) => (
-                    <ChipToggle
-                      key={item.key}
-                      active={accepted.has(item.key)}
-                      onClick={() => setAccepted((current) => toggleInSet(current, item.key))}
-                    >
-                      {item.label}
-                    </ChipToggle>
-                  ))}
+                <div className="mt-3 flex min-h-11 flex-wrap gap-2">
+                  {canCarry.length ? (
+                    canCarry.map((item) => (
+                      <ChipToggle key={item.key} active onClick={() => toggleCarry(item.key)}>
+                        {item.label} ×
+                      </ChipToggle>
+                    ))
+                  ) : (
+                    <p className="self-center text-sm text-[#62645f]">Nothing yet. Tap the items below that you can carry.</p>
+                  )}
                 </div>
               </div>
               <div>
                 <p className={labelClass}>What you won&apos;t carry</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {RESTRICTED.map((item) => (
-                    <ChipToggle
-                      key={item.key}
-                      active={restricted.has(item.key)}
-                      onClick={() => setRestricted((current) => toggleInSet(current, item.key))}
-                    >
-                      {item.label}
+                  {wontCarry.map((item) => (
+                    <ChipToggle key={item.key} active={false} onClick={() => toggleCarry(item.key)}>
+                      + {item.label}
                     </ChipToggle>
                   ))}
                 </div>
+                <p className="mt-2 text-xs text-[#62645f]">Illegal or restricted goods are never allowed.</p>
               </div>
               <div className="grid gap-5 sm:grid-cols-3">
                 <label className={labelClass}>
@@ -432,7 +444,7 @@ function CreateTripContent() {
                   />
                 </label>
                 <label className={labelClass}>
-                  Price per package
+                  Price per kg
                   <input
                     required
                     type="number"
@@ -452,7 +464,7 @@ function CreateTripContent() {
                     <>
                       <p className="text-xs uppercase tracking-[0.08em] text-[#62645f]">You take home</p>
                       <p className="mt-0.5 text-lg font-semibold text-[#285c59]">₹{pricingPreview.travelerPayoutAmount}</p>
-                      <p className="mt-1 text-xs text-[#62645f]">per package, after platform fee</p>
+                      <p className="mt-1 text-xs text-[#62645f]">per kg, after platform fee</p>
                     </>
                   ) : null}
                 </div>
@@ -489,7 +501,7 @@ function CreateTripContent() {
                 </div>
                 <div>
                   <dt className="text-[#62645f]">Capacity</dt>
-                  <dd className="font-semibold text-[#183b3a]">{maxParcelCount} parcels · up to {maxWeight} kg · ₹{price}/package</dd>
+                  <dd className="font-semibold text-[#183b3a]">{maxParcelCount} parcels · up to {maxWeight} kg · ₹{price}/kg</dd>
                 </div>
                 <div>
                   <dt className="text-[#62645f]">Pickup</dt>
@@ -501,8 +513,8 @@ function CreateTripContent() {
                 </div>
               </dl>
               <p className="border-t border-[#ded8ce] pt-4 text-sm text-[#62645f]">
-                Accepts: {[...accepted].map((key) => ACCEPTED.find((item) => item.key === key)?.label).join(", ") || "None"}
-                {restricted.size ? ` · Won't carry: ${[...restricted].map((key) => RESTRICTED.find((item) => item.key === key)?.label).join(", ")}` : ""}
+                Can carry: {canCarry.map((item) => item.label).join(", ") || "None"}
+                {wontCarry.length ? ` · Won't carry: ${wontCarry.map((item) => item.label).join(", ")}` : ""}
               </p>
             </div>
           )}

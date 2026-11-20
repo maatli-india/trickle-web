@@ -34,7 +34,6 @@ body {
 }
 
 /* Netlify injects its badge on hosted deploys. */
-#netlify-badge,
-.netlify-badge {
+#nl-badge-frame {
   display: none !important;
 }

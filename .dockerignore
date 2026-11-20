@@ -1,0 +1,5 @@
+# Build context = the runner's `next build` output only.
+*
+!.next/standalone
+!.next/static
+!public

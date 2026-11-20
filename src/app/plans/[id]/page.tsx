@@ -58,8 +58,8 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
             const embedded = details.requesters || details.requests || [];
             const loaded = matchesResult.status === "fulfilled" ? extractListItems<ParcelMatch>(matchesResult.value as never) : [];
             setRequests(loaded.length ? loaded : embedded);
-            if (details.pricePerPackage) {
-              previewTripPricing(details.pricePerPackage)
+            if (details.pricePerWeightKg) {
+              previewTripPricing(details.pricePerWeightKg)
                 .then((preview) => {
                   if (active) setPricingPreview(preview);
                 })
@@ -142,7 +142,7 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
     setTogglingAccepting(true);
     const next = !acceptingNewRequests;
     try {
-      await updateTravelPlan(plan.id, { ...plan, pricePerPackage: plan.pricePerPackage ?? 0, acceptingNewRequests: next, notifySenders: false });
+      await updateTravelPlan(plan.id, { ...plan, pricePerWeightKg: plan.pricePerWeightKg ?? 0, acceptingNewRequests: next, notifySenders: false });
       setAcceptingNewRequests(next);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not update this trip.");
@@ -205,13 +205,13 @@ export default function TripDetailsPage({ params }: { params: Promise<{ id: stri
             <p>Departure · {formatDateTime(plan.departureDate)}</p>
             <p>Arrival · {formatDateTime(plan.arrivalDate)}</p>
             {plan.maxWeightKg && <p>Up to {plan.maxWeightKg} kg</p>}
-            {plan.pricePerPackage && <p>₹{plan.pricePerPackage} / package</p>}
+            {plan.pricePerWeightKg && <p>₹{plan.pricePerWeightKg} / kg</p>}
           </div>
           {pricingPreview && (
             <div className="mt-4 inline-block rounded-xl border border-white/20 bg-white/10 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.08em] text-[#c5d4ce]">You take home</p>
               <p className="mt-0.5 text-lg font-semibold text-white">₹{pricingPreview.travelerPayoutAmount}</p>
-              <p className="mt-0.5 text-xs text-[#c5d4ce]">per package, after platform fee</p>
+              <p className="mt-0.5 text-xs text-[#c5d4ce]">per kg, after platform fee</p>
             </div>
           )}
         </section>

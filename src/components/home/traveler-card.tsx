@@ -12,8 +12,8 @@ export type NearbyTravelerPlan = {
   to?: { address?: string };
   departureDate?: string;
   arrivalDate?: string;
-  pricePerPackage?: number;
-  senderDisplayPricePerPackage?: number;
+  pricePerWeightKg?: number;
+  senderDisplayPricePerWeightKg?: number;
   travelerReliabilityBadge?: { score?: number };
   profile?: { name?: string; rating?: number; verified?: boolean };
 };
@@ -58,7 +58,7 @@ export function TravelerCard({
             </div>
           </div>
         </div>
-        <p className="shrink-0 text-sm font-semibold text-[#183b3a]">{plan.senderDisplayPricePerPackage ?? plan.pricePerPackage ? `₹${plan.senderDisplayPricePerPackage ?? plan.pricePerPackage}` : "Open"}</p>
+        <p className="shrink-0 text-sm font-semibold text-[#183b3a]">{plan.senderDisplayPricePerWeightKg ?? plan.pricePerWeightKg ? `₹${plan.senderDisplayPricePerWeightKg ?? plan.pricePerWeightKg}/kg` : "Open"}</p>
       </div>
 
       <span
@@ -89,7 +89,7 @@ export function TravelerCard({
       )}
       <p className="mt-2 flex items-center gap-1.5 text-xs text-[#a7a297]">
         <Package size={11} />
-        from ₹{plan.senderDisplayPricePerPackage ?? plan.pricePerPackage ?? "open"}
+        from ₹{plan.senderDisplayPricePerWeightKg ?? plan.pricePerWeightKg ?? "open"}/kg
       </p>
     </button>
   );

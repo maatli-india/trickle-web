@@ -18,12 +18,13 @@ export type TravelPlan = {
   additionalInfo?: string;
   maxWeightKg?: number;
   maxParcelCount?: number;
-  pricePerPackage?: number;
+  // ₹ per kg; a request's base amount is this × its estimatedWeightKg.
+  pricePerWeightKg?: number;
   // Populated by the backend only for a non-owner viewer (e.g. a sender
   // viewing this plan or a search result) — what they'd actually pay,
   // commission/GST already applied server-side. The traveler viewing their
   // own plan never gets this; they only ever see their own real rate above.
-  senderDisplayPricePerPackage?: number;
+  senderDisplayPricePerWeightKg?: number;
   timezone?: string;
   acceptedParcelTypes?: string[];
   acceptedParcelCategories?: string[];
@@ -79,7 +80,7 @@ export type ParcelMatch = {
   senderPayableAmount?: number;
   // travelerDisplayAmount: traveler-only, this request's own agreed amount
   // (sender-facing amount with the tier markup removed once) — diverges
-  // from the trip's listed pricePerPackage the moment a sender modifies
+  // from the trip's listed pricePerWeightKg the moment a sender modifies
   // their offer, so use this instead of the trip rate wherever a specific
   // request's headline price is shown to the traveler.
   travelerDisplayAmount?: number;

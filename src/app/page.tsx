@@ -270,8 +270,8 @@ type HomeTraveller = {
   maxWeightKg?: number;
   maxParcelCount?: number;
   acceptedParcelTypes?: string[];
-  pricePerPackage?: number;
-  senderDisplayPricePerPackage?: number;
+  pricePerWeightKg?: number;
+  senderDisplayPricePerWeightKg?: number;
   name?: string;
   rating?: number;
 };
@@ -444,7 +444,7 @@ function AuthenticatedHome() {
       to: plan.to,
       departureDate: plan.departureDate,
       arrivalDate: plan.arrivalDate,
-      pricePerPackage: plan.senderDisplayPricePerPackage ?? plan.pricePerPackage,
+      pricePerWeightKg: plan.senderDisplayPricePerWeightKg ?? plan.pricePerWeightKg,
     };
     window.sessionStorage.setItem(
       "trickle.web.selectedTraveller",

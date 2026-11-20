@@ -16,7 +16,7 @@ export type TravelPlanPayload = {
   timezone?: string;
   additionalInfo?: string;
   maxWeightKg?: number;
-  pricePerPackage: number;
+  pricePerWeightKg: number;
   maxParcelCount?: number;
   acceptingNewRequests?: boolean;
   acceptedParcelTypes?: string[];
@@ -88,7 +88,7 @@ export const searchTravelPlans = (params: {
 }) => apiRequest(`/v1/travel-plans/search${buildQuery(params)}`);
 
 export type TravelPlanPricingPreview = {
-  pricePerPackage: number;
+  pricePerWeightKg: number;
   senderDisplayAmount: number;
   travelerPayoutAmount: number;
 };
@@ -97,8 +97,8 @@ export type TravelPlanPricingPreview = {
 // what they'd actually take home for a candidate price, before saving the
 // trip — mirrors the server's real payout math (see transitorder's
 // computeAmountViews) rather than duplicating tier logic client-side.
-export const previewTripPricing = (pricePerPackage: number) =>
-  apiRequest<TravelPlanPricingPreview>(`/v1/travel-plans/price-preview${buildQuery({ pricePerPackage })}`);
+export const previewTripPricing = (pricePerWeightKg: number) =>
+  apiRequest<TravelPlanPricingPreview>(`/v1/travel-plans/price-preview${buildQuery({ pricePerWeightKg })}`);
 
 export type TravelPlanSearchPage = { items?: TravelPlan[]; total?: number; page?: number; limit?: number };
 

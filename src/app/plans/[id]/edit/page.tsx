@@ -91,7 +91,7 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
         setDelivery(keysFromApiValues(loadedPlan.deliveryHandovers, loadedPlan.deliveryHandover, DELIVERY_KEY_FROM_API));
         setMaxWeight(String(loadedPlan.maxWeightKg || 5));
         setMaxParcelCount(String(loadedPlan.maxParcelCount || 1));
-        setPrice(loadedPlan.pricePerPackage ? String(loadedPlan.pricePerPackage) : "");
+        setPrice(loadedPlan.pricePerWeightKg ? String(loadedPlan.pricePerWeightKg) : "");
         setNote(loadedPlan.additionalInfo || "");
       } else {
         setError("We could not load this trip.");
@@ -160,7 +160,7 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
     }
     const priceValue = Number(price);
     if (!price || !Number.isFinite(priceValue) || priceValue <= 0) {
-      setError("Set a price per package.");
+      setError("Set a price per kg.");
       return;
     }
     if (!pickup.size || !delivery.size) {
@@ -196,7 +196,7 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
         timezone: plan.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata",
         additionalInfo: note.trim(),
         maxWeightKg: weight,
-        pricePerPackage: priceValue,
+        pricePerWeightKg: priceValue,
         maxParcelCount: count,
         acceptedParcelTypes: plan.acceptedParcelTypes,
         acceptedParcelCategories: plan.acceptedParcelCategories,
@@ -337,7 +337,7 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
             <input type="number" min={1} max={20} step={1} value={maxParcelCount} onChange={(event) => setMaxParcelCount(event.target.value)} className={inputClass} />
           </label>
           <label className={labelClass}>
-            Price per package
+            Price per kg
             <input required type="number" min={1} value={price} onChange={(event) => setPrice(event.target.value)} className={inputClass} placeholder="₹" />
           </label>
         </div>
@@ -349,7 +349,7 @@ export default function EditTripPage({ params }: { params: Promise<{ id: string 
               <>
                 <p className="text-xs uppercase tracking-[0.08em] text-[#62645f]">You take home</p>
                 <p className="mt-0.5 text-lg font-semibold text-[#285c59]">₹{pricingPreview.travelerPayoutAmount}</p>
-                <p className="mt-1 text-xs text-[#62645f]">per package, after platform fee</p>
+                <p className="mt-1 text-xs text-[#62645f]">per kg, after platform fee</p>
               </>
             ) : null}
           </div>
