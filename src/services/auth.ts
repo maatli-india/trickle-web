@@ -69,9 +69,14 @@ export const logoutWebSession = async () => {
   }
 };
 
-export const generateDeleteAccountOtp = () => apiRequest("/v1/auth/delete-account/otp", { method: "POST" });
+// The word a signed-in user types to confirm account deletion. No SMS code:
+// signing in already needed one. transitorder accepts it case-insensitively.
+export const DELETE_CONFIRM_WORD = "DELETE";
 
-export const deleteAccount = (otp: string) => apiRequest("/v1/users/me", { method: "DELETE", body: JSON.stringify({ otp }) });
+export const deleteConfirmMatches = (text: string) => text.trim().toUpperCase() === DELETE_CONFIRM_WORD;
+
+export const deleteAccount = () =>
+  apiRequest("/v1/users/me", { method: "DELETE", body: JSON.stringify({ confirm: DELETE_CONFIRM_WORD }) });
 
 type TokenPair = { accessToken: string; refreshToken?: string };
 
