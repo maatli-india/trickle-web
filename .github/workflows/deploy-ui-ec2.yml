@@ -256,6 +256,12 @@ jobs:
           IMAGE_TAG: ${{ steps.suffix.outputs.suffix }}
           MESSAGE: ${{ steps.meta.outputs.message }}
           NEXT_PUBLIC_API_BASE_URL: https://api-base-url.placeholder.invalid
+          # Build-time, baked into the one image every env runs, so these come
+          # from repository variables. Unset = showcase site (download page
+          # only); "true" = full web app. Empty store URLs show "coming soon".
+          NEXT_PUBLIC_WEB_APP_ENABLED: ${{ vars.NEXT_PUBLIC_WEB_APP_ENABLED }}
+          NEXT_PUBLIC_PLAY_STORE_URL: ${{ vars.NEXT_PUBLIC_PLAY_STORE_URL }}
+          NEXT_PUBLIC_APP_STORE_URL: ${{ vars.NEXT_PUBLIC_APP_STORE_URL }}
           SHA: ${{ steps.meta.outputs.sha }}
         run: |
           set -euo pipefail
