@@ -186,6 +186,11 @@ jobs:
       MODE: ${{ needs.release.outputs.mode }}
       NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
       NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      # Unset = showcase site (download page only); "true" = full web app.
+      NEXT_PUBLIC_WEB_APP_ENABLED: ${{ vars.NEXT_PUBLIC_WEB_APP_ENABLED }}
+      # Store listings; empty shows "coming soon".
+      NEXT_PUBLIC_PLAY_STORE_URL: ${{ vars.NEXT_PUBLIC_PLAY_STORE_URL }}
+      NEXT_PUBLIC_APP_STORE_URL: ${{ vars.NEXT_PUBLIC_APP_STORE_URL }}
     steps:
       - name: Check ${{ matrix.env }} config
         env:

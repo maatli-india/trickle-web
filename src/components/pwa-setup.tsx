@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { Download, Share, X } from "lucide-react";
+import { webAppEnabled } from "@/lib/app-links";
 
 // Registers the PWA service worker (public/sw.js) and shows a small,
 // dismissible "Install Trickle" banner:
@@ -102,7 +103,8 @@ export function PwaSetup() {
   };
 
   const blockedRoute = pathname?.startsWith("/admin") || pathname?.startsWith("/payment");
-  if (closed || mode === "hidden" || blockedRoute || (mode === "prompt" && !installEvent)) return null;
+  // Showcase mode points people at the store apps, not an installable website.
+  if (!webAppEnabled || closed || mode === "hidden" || blockedRoute || (mode === "prompt" && !installEvent)) return null;
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

@@ -7,6 +7,7 @@ import { getWebProfile, hasAccessToken, logoutWebSession } from "@/services/auth
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Avatar } from "@/components/ui/avatar";
 import { TrickleLogo } from "@/components/layout/trickle-logo";
+import { webAppEnabled } from "@/lib/app-links";
 
 const subscribe = () => () => {};
 
@@ -40,7 +41,9 @@ const primaryNavItems = [
 export function SiteHeader() {
   const router = useRouter();
   const pathname = usePathname();
-  const authenticated = useSyncExternalStore(subscribe, hasAccessToken, () => false);
+  // In showcase mode there is no web sign-in, so an old session is ignored.
+  const hasSession = useSyncExternalStore(subscribe, hasAccessToken, () => false);
+  const authenticated = webAppEnabled && hasSession;
   const profileValue = useSyncExternalStore(subscribe, getWebProfile, () => null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -107,8 +110,10 @@ export function SiteHeader() {
             <span className="hidden max-w-32 truncate text-sm font-semibold text-[#183b3a] sm:block">{displayName}</span>
             <span className="text-xs text-[#e85b43]" aria-hidden="true">▼</span>
           </button>
-        ) : (
+        ) : webAppEnabled ? (
           <a href="/register" className="rounded-full bg-[#1b1d1c] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#343735]">Sign in</a>
+        ) : (
+          <Link href="/" className="rounded-full bg-[#1b1d1c] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#343735]">Get the app</Link>
         )}
       </div>
       {authenticated && menuOpen && (
