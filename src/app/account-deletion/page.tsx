@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Check, Clock, Trash2, UserX } from "lucide-react";
 import { AccountPage } from "@/components/account/account-page";
-import { clearWebSession, deleteAccount, generateDeleteAccountOtp, hasAccessToken } from "@/services/auth";
+import { clearWebSession, DELETE_CONFIRM_WORD, deleteAccount, deleteConfirmMatches, hasAccessToken } from "@/services/auth";
 
 const REASONS = ["Found a better alternative", "Privacy or trust concerns", "I'm not using it enough", "Had a bad experience with a delivery", "Too expensive", "Other"];
 const CONSEQUENCES = [
@@ -15,6 +15,21 @@ const CONSEQUENCES = [
 ];
 
 const subscribe = () => () => {};
+
+// Maps DELETE /v1/users/me's error_code to copy; the guard refusals already
+// come with a user-facing message from the backend.
+const deletionErrorMessage = (err: unknown) => {
+  const error = err as { status?: number; message?: string; data?: { error_code?: string; message?: string } } | undefined;
+  switch (error?.data?.error_code) {
+    case "ACTIVE_DELIVERY_REQUESTS":
+    case "UNDER_INVESTIGATION":
+      return error.data.message || "This account can't be deleted right now.";
+    case "DELETE_CONFIRMATION_REQUIRED":
+      return `Type ${DELETE_CONFIRM_WORD} in the box to confirm deleting your account.`;
+    default:
+      return "We could not delete your account. Please try again.";
+  }
+};
 
 function DeletionPolicy() {
   return (
@@ -47,7 +62,7 @@ function DeletionPolicy() {
 
       <div className="border-t-2 border-[#183b3a] bg-[#183b3a] p-6 text-white sm:p-8">
         <h2 className="text-xl font-semibold">How to request deletion</h2>
-        <p className="mt-2 text-sm leading-6 text-[#c5d4ce]">Account deletion requires phone verification, so it can only be completed while signed in. Sign in to your account, then return to this page (or Account Settings) to start the request.</p>
+        <p className="mt-2 text-sm leading-6 text-[#c5d4ce]">Account deletion can only be completed while signed in, and you confirm it by typing {DELETE_CONFIRM_WORD}. Sign in to your account, then return to this page (or Account Settings) to start the request.</p>
         <Link href="/register" className="mt-5 inline-block rounded-xl bg-[#e85b43] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#cf4935]">Sign in to continue</Link>
       </div>
 
@@ -60,40 +75,24 @@ function DeletionFlow() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [reason, setReason] = useState<string | null>(null);
-  const [otp, setOtp] = useState("");
-  const [sendingOtp, setSendingOtp] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
   const [understood, setUnderstood] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
-  const requestOtp = async () => {
-    setSendingOtp(true);
-    setError("");
-    try {
-      await generateDeleteAccountOtp();
-      setOtpSent(true);
-    } catch {
-      setError("We could not send a verification code. Please try again.");
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
-  const goToStep3 = async () => {
-    setStep(3);
-    await requestOtp();
-  };
+  // Steps: 1 consequences → 2 optional reason → 3 tick + type DELETE → 4 done.
+  // No SMS code: the user is already signed in.
+  const canSubmit = understood && deleteConfirmMatches(confirmText) && !deleting;
 
   const submitDeletion = async () => {
+    if (!canSubmit) return;
     setDeleting(true);
     setError("");
     try {
-      await deleteAccount(otp);
-      setStep(5);
-    } catch {
-      setError("We could not delete your account. Check the code and try again.");
+      await deleteAccount();
+      setStep(4);
+    } catch (err) {
+      setError(deletionErrorMessage(err));
     } finally {
       setDeleting(false);
     }
@@ -110,7 +109,7 @@ function DeletionFlow() {
 
   return (
     <div className="max-w-xl space-y-6">
-      {step > 1 && step < 5 && (
+      {step > 1 && step < 4 && (
         <button type="button" onClick={() => setStep((value) => value - 1)} className="text-sm font-semibold text-[#285c59]">‹ Back</button>
       )}
 
@@ -151,30 +150,11 @@ function DeletionFlow() {
               );
             })}
           </div>
-          <button type="button" onClick={goToStep3} className="mt-6 rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59]">Continue</button>
+          <button type="button" onClick={() => setStep(3)} className="mt-6 rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59]">Continue</button>
         </div>
       )}
 
       {step === 3 && (
-        <div className="border-t-2 border-[#e85b43] bg-[#fbfaf7] p-6 sm:p-8">
-          <h2 className="text-2xl font-semibold text-[#183b3a]">Confirm it&apos;s you</h2>
-          <p className="mt-2 text-sm leading-6 text-[#62645f]">{sendingOtp ? "Sending a verification code..." : "We've sent a 6-digit code to your registered phone number."}</p>
-          <input
-            value={otp}
-            onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
-            placeholder="Enter OTP"
-            inputMode="numeric"
-            className="mt-4 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-center text-lg tracking-[0.4em] outline-none focus:border-[#e85b43]"
-          />
-          <button type="button" onClick={requestOtp} disabled={sendingOtp} className="mt-3 text-sm font-semibold text-[#285c59] disabled:opacity-60">{sendingOtp ? "Sending..." : "Resend code"}</button>
-          {error && <p role="alert" className="mt-2 text-sm text-[#b33e2c]">{error}</p>}
-          {otpSent && (
-            <button type="button" disabled={otp.length !== 6} onClick={() => setStep(4)} className="mt-6 block rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59] disabled:opacity-60">Continue</button>
-          )}
-        </div>
-      )}
-
-      {step === 4 && (
         <div className="border-t-2 border-[#e85b43] bg-[#fbfaf7] p-6 sm:p-8">
           <span className="grid size-12 place-items-center rounded-full bg-[#fff0eb] text-[#b33e2c]"><AlertTriangle size={22} /></span>
           <h2 className="mt-4 text-2xl font-semibold text-[#183b3a]">This is permanent after 30 days</h2>
@@ -183,17 +163,26 @@ function DeletionFlow() {
             <input type="checkbox" checked={understood} onChange={(event) => setUnderstood(event.target.checked)} className="mt-1" />
             I understand this action is permanent and cannot be undone after the grace period.
           </label>
-          <p className="mt-5 text-sm font-semibold text-[#183b3a]">Type DELETE to confirm</p>
+          <label htmlFor="delete-confirm-input" className="mt-5 block text-sm font-semibold text-[#183b3a]">Type {DELETE_CONFIRM_WORD} to confirm</label>
+          <p id="delete-confirm-hint" className="mt-1 text-xs leading-5 text-[#62645f]">Type the word {DELETE_CONFIRM_WORD} exactly as shown. No code will be sent to your phone.</p>
           <input
+            id="delete-confirm-input"
+            data-testid="delete-confirm-input"
+            aria-describedby="delete-confirm-hint"
             value={confirmText}
             onChange={(event) => setConfirmText(event.target.value.toUpperCase())}
-            placeholder="DELETE"
+            placeholder={DELETE_CONFIRM_WORD}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="characters"
+            spellCheck={false}
             className="mt-2 w-full rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
           />
           {error && <p role="alert" className="mt-2 text-sm text-[#b33e2c]">{error}</p>}
           <button
             type="button"
-            disabled={!understood || confirmText !== "DELETE" || deleting}
+            data-testid="delete-confirm-submit"
+            disabled={!canSubmit}
             onClick={submitDeletion}
             className="mt-6 flex items-center gap-2 rounded-xl bg-[#b33e2c] px-5 py-3 text-sm font-semibold text-white hover:bg-[#98301f] disabled:opacity-50"
           >
@@ -203,7 +192,7 @@ function DeletionFlow() {
         </div>
       )}
 
-      {step === 5 && (
+      {step === 4 && (
         <div className="flex flex-col items-center border-t-2 border-[#e85b43] bg-[#fbfaf7] p-8 text-center">
           <span className="grid size-14 place-items-center rounded-full bg-[#183b3a] text-white"><Check size={24} /></span>
           <h2 className="mt-4 text-2xl font-semibold text-[#183b3a]">Deletion scheduled</h2>
