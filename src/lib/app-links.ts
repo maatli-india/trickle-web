@@ -12,8 +12,10 @@ export const appStoreUrl = process.env.NEXT_PUBLIC_APP_STORE_URL?.trim() || "";
 
 // Pages that stay reachable in showcase mode: information and legal pages
 // (Play/App Store need privacy, terms and account deletion), contact,
-// shared-trip links from the app (/t/<id>), and the API proxy those pages
-// use. Everything else redirects to the homepage.
+// shared-trip links from the app (/t/<id>), parcel-tracking links shared
+// with recipients (/track/<token>), the iOS/Android app-link files
+// (/.well-known/*), and the API proxy those pages use. Everything else
+// redirects to the homepage.
 const SHOWCASE_PREFIXES = [
   "/about",
   "/blog",
@@ -29,6 +31,8 @@ const SHOWCASE_PREFIXES = [
   "/account-deletion",
   "/download",
   "/t/",
+  "/track/",
+  "/.well-known/",
   "/api/",
   // Internal team pages (admin login required); not part of the public app.
   "/admin",

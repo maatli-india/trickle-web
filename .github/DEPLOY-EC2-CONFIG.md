@@ -54,6 +54,32 @@ until the certificate is issued.
 `NEXT_PUBLIC_API_BASE_URL` is the same key as trickle-dash. Read at deploy time and passed to the container; Google Places goes through
 this backend, so the web needs no Google key. Missing required keys fail the run before anything is built.
 
+### App links (optional, runtime)
+
+`/.well-known/apple-app-site-association` (iOS Universal Links) and `/.well-known/assetlinks.json` (Android App
+Links) make `https://<PUBLIC_HOST>/track/<token>` open the Trickle app when it's installed. Both are read from
+**server-side runtime env vars** at request time (not inlined at build), so one image serves every env:
+
+| Env var | Default | Notes |
+|---|---|---|
+| `APPLE_TEAM_ID` | `LUY43YPR5U` | Apple Developer Team ID (`appIDs` = `<team>.<bundle>`) |
+| `IOS_BUNDLE_ID` | `com.trickle.maatli` | iOS bundle identifier |
+| `ANDROID_PACKAGE_NAME` | `com.trickle.maatli` | Android application ID |
+| `ANDROID_SHA256_CERT_FINGERPRINTS` | empty | Comma-separated SHA-256 signing-cert fingerprints (`AA:BB:…`). Include the **Play App Signing** key from Play Console (plus the upload/debug key if those builds should open links too). Empty = `assetlinks.json` returns `[]` (no Android app links) |
+
+**Not wired yet:** the `docker run` in `deploy-ui-ec2.yml` passes only `-e API_BASE_URL`, so these are unset on
+EC2 and the defaults apply — the AASA file is correct with the defaults above, but `assetlinks.json` stays `[]`
+until `ANDROID_SHA256_CERT_FINGERPRINTS` is passed to the container (add a GitHub variable and a matching
+`-e ANDROID_SHA256_CERT_FINGERPRINTS=…` to each env's `run_container`).
+
+The files alone don't open the app: the iOS build also needs the Associated Domains entitlement
+(`applinks:<PUBLIC_HOST>` for each env host), and the Android build an `android:autoVerify="true"` intent filter
+for `https://<PUBLIC_HOST>/track/`.
+
+CloudFront must forward `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json` to the app
+(not only `/.well-known/acme-challenge/*` to Traefik's ACME router), without redirects, and with
+`Content-Type: application/json` intact.
+
 ## Secrets (repo level, or per env to override)
 
 | Key | Notes |

@@ -28,6 +28,27 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'" },
         ],
       },
+      {
+        // Public parcel-tracking pages: the token in the URL is a secret that
+        // reveals the delivery code, so never cache or index them, and never
+        // send the URL as Referer (e.g. on a store-button click). Must stay
+        // after "/:path*" — for a repeated key the last match wins.
+        source: "/track/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+      {
+        // The tracking API response (via the /api/v1 proxy) carries the
+        // delivery code itself.
+        source: "/api/v1/track/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
     ];
   },
   async rewrites() {
