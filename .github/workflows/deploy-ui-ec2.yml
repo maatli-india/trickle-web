@@ -290,6 +290,9 @@ jobs:
     env:
       ENV_NAME: dev
       API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      # Android App Links (/.well-known/assetlinks.json) — comma-separated
+      # SHA-256 signing-cert fingerprints; empty → the file serves [].
+      ANDROID_SHA256_CERT_FINGERPRINTS: ${{ vars.ANDROID_SHA256_CERT_FINGERPRINTS }}
       IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
       MODE: ${{ needs.release.outputs.mode }}
       PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
@@ -328,6 +331,7 @@ jobs:
           FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
           cat > /tmp/d.sh <<EOF
           API_BASE_URL='$API_BASE_URL'
+          ANDROID_SHA256_CERT_FINGERPRINTS='$ANDROID_SHA256_CERT_FINGERPRINTS'
           CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
           CONTAINER_MEMORY='$CONTAINER_MEMORY'
           CONTAINER_NAME='$CONTAINER_NAME'
@@ -351,6 +355,7 @@ jobs:
             docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
               --memory "$CONTAINER_MEMORY" \
               -e API_BASE_URL="$API_BASE_URL" \
+              -e ANDROID_SHA256_CERT_FINGERPRINTS="$ANDROID_SHA256_CERT_FINGERPRINTS" \
               --label "traefik.enable=true" \
               --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
               --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
@@ -489,6 +494,9 @@ jobs:
     env:
       ENV_NAME: qa
       API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      # Android App Links (/.well-known/assetlinks.json) — comma-separated
+      # SHA-256 signing-cert fingerprints; empty → the file serves [].
+      ANDROID_SHA256_CERT_FINGERPRINTS: ${{ vars.ANDROID_SHA256_CERT_FINGERPRINTS }}
       IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
       MODE: ${{ needs.release.outputs.mode }}
       PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
@@ -527,6 +535,7 @@ jobs:
           FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
           cat > /tmp/d.sh <<EOF
           API_BASE_URL='$API_BASE_URL'
+          ANDROID_SHA256_CERT_FINGERPRINTS='$ANDROID_SHA256_CERT_FINGERPRINTS'
           CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
           CONTAINER_MEMORY='$CONTAINER_MEMORY'
           CONTAINER_NAME='$CONTAINER_NAME'
@@ -550,6 +559,7 @@ jobs:
             docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
               --memory "$CONTAINER_MEMORY" \
               -e API_BASE_URL="$API_BASE_URL" \
+              -e ANDROID_SHA256_CERT_FINGERPRINTS="$ANDROID_SHA256_CERT_FINGERPRINTS" \
               --label "traefik.enable=true" \
               --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
               --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
@@ -686,6 +696,9 @@ jobs:
     env:
       ENV_NAME: prod
       API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      # Android App Links (/.well-known/assetlinks.json) — comma-separated
+      # SHA-256 signing-cert fingerprints; empty → the file serves [].
+      ANDROID_SHA256_CERT_FINGERPRINTS: ${{ vars.ANDROID_SHA256_CERT_FINGERPRINTS }}
       IMAGE_TAG: ${{ needs.release.outputs.image_tag }}
       MODE: ${{ needs.release.outputs.mode }}
       PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
@@ -724,6 +737,7 @@ jobs:
           FULL_IMAGE="${DOCKER_IMAGE}:${IMAGE_TAG}"
           cat > /tmp/d.sh <<EOF
           API_BASE_URL='$API_BASE_URL'
+          ANDROID_SHA256_CERT_FINGERPRINTS='$ANDROID_SHA256_CERT_FINGERPRINTS'
           CF_ORIGIN_SECRET='$CF_ORIGIN_SECRET'
           CONTAINER_MEMORY='$CONTAINER_MEMORY'
           CONTAINER_NAME='$CONTAINER_NAME'
@@ -747,6 +761,7 @@ jobs:
             docker run -d --name "$CONTAINER_NAME" --restart always --network "$TRAEFIK_NETWORK" \
               --memory "$CONTAINER_MEMORY" \
               -e API_BASE_URL="$API_BASE_URL" \
+              -e ANDROID_SHA256_CERT_FINGERPRINTS="$ANDROID_SHA256_CERT_FINGERPRINTS" \
               --label "traefik.enable=true" \
               --label "traefik.http.routers.${CONTAINER_NAME}.rule=Host(\`${PUBLIC_HOST}\`) && Header(\`X-Origin-Verify\`, \`${CF_ORIGIN_SECRET}\`)" \
               --label "traefik.http.routers.${CONTAINER_NAME}.entrypoints=websecure" \
