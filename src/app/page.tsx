@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Bell, BadgeCheck, Calendar, ChevronRight, FileCheck, Grid3X3, Lock, MapPin, MessageCircleWarning, Package, Search, ShieldCheck, X } from "lucide-react";
@@ -299,6 +299,28 @@ function AuthenticatedHome() {
   const [customDate, setCustomDate] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [allCategoriesOpen, setAllCategoriesOpen] = useState(false);
+  const categoryRowRef = useRef<HTMLDivElement>(null);
+  const categoryOffsets = useRef<Map<Element, number> | null>(null);
+
+  // FLIP: after the reorder, each button starts at its old offset and slides to its new one,
+  // so the picked category travels to the front while the rest shift right.
+  useLayoutEffect(() => {
+    const row = categoryRowRef.current;
+    const previous = categoryOffsets.current;
+    categoryOffsets.current = null;
+    if (!row || !previous) return;
+    row.scrollTo({ left: 0, behavior: "smooth" });
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    for (const child of Array.from(row.children) as HTMLElement[]) {
+      const before = previous.get(child);
+      if (before === undefined) {
+        child.animate([{ opacity: 0, transform: "scale(0.8)" }, { opacity: 1, transform: "none" }], { duration: 300, easing: "ease-out" });
+        continue;
+      }
+      const delta = before - child.offsetLeft;
+      if (delta) child.animate([{ transform: `translateX(${delta}px)` }, { transform: "none" }], { duration: 400, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+    }
+  }, [selectedCategory]);
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [nearbyTravelers, setNearbyTravelers] = useState<NearbyTravelerPlan[]>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -463,6 +485,13 @@ function AuthenticatedHome() {
 
   const orderedCategories = selectedCategory ? [selectedCategory, ...CATEGORIES.map((c) => c.name).filter((name) => name !== selectedCategory)] : CATEGORIES.map((c) => c.name);
 
+  // Remembers where each category button sits so the layout effect below can slide it from there.
+  const selectCategory = (name: string) => {
+    const row = categoryRowRef.current;
+    if (row) categoryOffsets.current = new Map(Array.from(row.children, (child): [Element, number] => [child, (child as HTMLElement).offsetLeft]));
+    setSelectedCategory(name);
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-[#f6f2eb] text-[#1b1d1c]">
       <SiteHeader />
@@ -490,29 +519,40 @@ function AuthenticatedHome() {
 
         <section className="pt-8">
           <h2 className="text-base font-semibold text-[#183b3a]">What are you sending?</h2>
-          <div className="mt-3 flex gap-3 overflow-x-auto px-1 pb-2 pt-2">
+          <div ref={categoryRowRef} className="mt-3 flex gap-3 overflow-x-auto px-1 pb-2 pt-2">
             {orderedCategories.map((name) => {
               const category = CATEGORIES.find((item) => item.name === name);
               const Icon = category?.icon || Grid3X3;
               const tint = TINTS[CATEGORIES.findIndex((item) => item.name === name) % TINTS.length] || TINTS[0];
               const active = selectedCategory === name;
               return (
-                <button key={name} type="button" onClick={() => setSelectedCategory(name)} className="flex shrink-0 flex-col items-center gap-1.5">
+                <button
+                  key={name}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => selectCategory(name)}
+                  className="group flex shrink-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[#e85b43]"
+                >
                   <span
-                    className="grid size-14 place-items-center rounded-full transition"
+                    className="grid size-14 place-items-center rounded-full transition duration-200 group-hover:-translate-y-0.5 group-hover:shadow-md group-active:scale-95"
                     style={{ backgroundColor: tint.bg, color: tint.fg, outline: active ? `2px solid ${tint.fg}` : undefined, outlineOffset: 2 }}
                   >
                     <Icon size={20} />
                   </span>
-                  <span className={`text-xs ${active ? "font-semibold text-[#183b3a]" : "text-[#62645f]"}`}>{name}</span>
+                  <span className={`text-xs transition group-hover:text-[#183b3a] ${active ? "font-semibold text-[#183b3a]" : "text-[#62645f]"}`}>{name}</span>
                 </button>
               );
             })}
-            <button type="button" onClick={() => setAllCategoriesOpen((value) => !value)} className="flex shrink-0 flex-col items-center gap-1.5">
-              <span className="grid size-14 place-items-center rounded-full bg-[#eef1f6] text-[#62645f]">
+            <button
+              type="button"
+              aria-expanded={allCategoriesOpen}
+              onClick={() => setAllCategoriesOpen((value) => !value)}
+              className="group flex shrink-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[#e85b43]"
+            >
+              <span className="grid size-14 place-items-center rounded-full bg-[#eef1f6] text-[#62645f] transition duration-200 group-hover:-translate-y-0.5 group-hover:bg-[#e4e8f0] group-hover:shadow-md group-active:scale-95">
                 <Grid3X3 size={20} />
               </span>
-              <span className="text-xs text-[#62645f]">See all</span>
+              <span className="text-xs text-[#62645f] transition group-hover:text-[#183b3a]">See all</span>
             </button>
           </div>
           {allCategoriesOpen && (
@@ -522,10 +562,10 @@ function AuthenticatedHome() {
                   key={name}
                   type="button"
                   onClick={() => {
-                    setSelectedCategory(name);
+                    selectCategory(name);
                     setAllCategoriesOpen(false);
                   }}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedCategory === name ? "border-[#e85b43] bg-[#e85b43] text-white" : "border-[#d7d2c9] bg-white text-[#183b3a]"}`}
+                  className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-semibold transition ${selectedCategory === name ? "border-[#e85b43] bg-[#e85b43] text-white" : "border-[#d7d2c9] bg-white text-[#183b3a] hover:border-[#e85b43] hover:text-[#e85b43]"}`}
                 >
                   {name}
                 </button>

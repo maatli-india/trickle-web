@@ -7,11 +7,23 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { Avatar } from "@/components/ui/avatar";
 import { apiRequest } from "@/services/api-client";
-import { listParcelMatches } from "@/services/parcel-matches";
+import { listParcelMatches, uploadParcelImages } from "@/services/parcel-matches";
 import { getTravelPlanInterest, recordTravelPlanView, registerTravelPlanInterest } from "@/services/travel-plans";
 import { extractListItems, type ParcelMatch } from "@/types/travel";
 import { inputClass, labelClass } from "@/components/forms/location-fields";
-import { CATEGORIES, MAX_PHOTOS, PICKUP_HANDOVER_OPTIONS, DELIVERY_HANDOVER_OPTIONS, getHandoverOptions, BLOCKING_REQUEST_STATUSES, type HandoverOption } from "@/lib/request-form-constants";
+import {
+  CATEGORIES,
+  MAX_PARCEL_IMAGE_BYTES,
+  MAX_PARCEL_MEDIA,
+  MAX_PARCEL_VIDEO_BYTES,
+  PARCEL_IMAGE_TYPES,
+  PARCEL_VIDEO_TYPES,
+  PICKUP_HANDOVER_OPTIONS,
+  DELIVERY_HANDOVER_OPTIONS,
+  getHandoverOptions,
+  BLOCKING_REQUEST_STATUSES,
+  type HandoverOption,
+} from "@/lib/request-form-constants";
 import { SafetyDeclarationModal, type SafetyDeclaration } from "@/components/forms/safety-declaration-modal";
 import { getRequestStatusLabel } from "@/lib/parcel-status";
 import { SavedAddressPicker } from "@/components/saved-address-picker";
@@ -62,6 +74,8 @@ type Traveller = {
   pickupHandover?: string;
   deliveryHandovers?: string[];
   deliveryHandover?: string;
+  pickupMeetingPoint?: string;
+  deliveryMeetingPoint?: string;
   acceptingNewRequests?: boolean;
   user?: { id?: string; name?: string; rating?: number; ratings?: number; trips?: number; completedTrips?: number; totalCount?: number };
 };
@@ -73,7 +87,16 @@ const formatDate = (value?: string) => {
   const date = new Date(String(value).replace(" ", "T"));
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 };
-const maxParcelImageSize = 1024 * 1024;
+
+type FormField = "pickup" | "pickupNote" | "delivery" | "deliveryNote" | "weight" | "packageCount";
+
+const Required = () => (
+  <span aria-hidden="true" className="ml-0.5 text-[#b33e2c]">
+    *
+  </span>
+);
+
+const invalidRing = (invalid: boolean) => (invalid ? "ring-2 ring-[#b33e2c] ring-offset-2 ring-offset-[#fbfaf7]" : "");
 
 export default function TravellerRequestPage() {
   const router = useRouter();
@@ -82,6 +105,8 @@ export default function TravellerRequestPage() {
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+  const [invalidField, setInvalidField] = useState<FormField | null>(null);
+  const [uploadWarning, setUploadWarning] = useState("");
   const [duplicateAlert, setDuplicateAlert] = useState(false);
   const [showDeclaration, setShowDeclaration] = useState(false);
   const [acceptingNewRequests, setAcceptingNewRequests] = useState(true);
@@ -100,7 +125,7 @@ export default function TravellerRequestPage() {
   const [delivery, setDelivery] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState("");
   const [message, setMessage] = useState("");
-  const [parcelImages, setParcelImages] = useState<File[]>([]);
+  const [parcelMedia, setParcelMedia] = useState<File[]>([]);
   const [showPickupPicker, setShowPickupPicker] = useState(false);
   const [showDeliveryPicker, setShowDeliveryPicker] = useState(false);
 
@@ -179,24 +204,28 @@ export default function TravellerRequestPage() {
     }
   };
 
-  const addParcelImages = (files: FileList | null) => {
+  const addParcelMedia = (files: FileList | null) => {
     if (!files) return;
     const nextFiles = Array.from(files);
-    if (nextFiles.some((file) => !["image/jpeg", "image/png", "image/webp"].includes(file.type))) {
-      setError("Use JPG, PNG, or WebP images only.");
+    if (nextFiles.some((file) => !PARCEL_IMAGE_TYPES.includes(file.type) && !PARCEL_VIDEO_TYPES.includes(file.type))) {
+      setError("Use JPG, PNG, or WebP photos, or MP4, MOV, or WebM videos only.");
       return;
     }
-    if (nextFiles.some((file) => file.size > maxParcelImageSize)) {
-      setError("Each parcel image must be 1 MB or smaller.");
+    if (nextFiles.some((file) => PARCEL_IMAGE_TYPES.includes(file.type) && file.size > MAX_PARCEL_IMAGE_BYTES)) {
+      setError("Each photo can be 1MB max.");
       return;
     }
-    setParcelImages((current) => {
+    if (nextFiles.some((file) => PARCEL_VIDEO_TYPES.includes(file.type) && file.size > MAX_PARCEL_VIDEO_BYTES)) {
+      setError("Each video can be 50MB max. Trim it or record a shorter clip.");
+      return;
+    }
+    setParcelMedia((current) => {
       const combined = [...current, ...nextFiles];
       const unique = combined.filter(
         (file, index, all) => all.findIndex((candidate) => candidate.name === file.name && candidate.size === file.size && candidate.lastModified === file.lastModified) === index,
       );
-      if (unique.length > MAX_PHOTOS) setError(`You can upload up to ${MAX_PHOTOS} images.`);
-      return unique.slice(0, MAX_PHOTOS);
+      if (unique.length > MAX_PARCEL_MEDIA) setError(`You can upload up to ${MAX_PARCEL_MEDIA} files.`);
+      return unique.slice(0, MAX_PARCEL_MEDIA);
     });
   };
 
@@ -240,9 +269,29 @@ export default function TravellerRequestPage() {
   const numericWeight = Number(weight);
   const numericPackageCount = Number(packageCount);
   const totalPrice = Number((ratePerKg * (Number.isFinite(numericWeight) ? numericWeight : 0)).toFixed(2));
+  // Same rule as the backend's validateHandoverSelection: door pickup/delivery ("home") is always the
+  // sender's/receiver's own address; any other option needs a note only when the trip has no preset point.
+  const pickupMeetingPoint = traveller.pickupMeetingPoint?.trim() || "";
+  const deliveryMeetingPoint = traveller.deliveryMeetingPoint?.trim() || "";
+  const needsPickupNote = Boolean(pickup) && (pickup === "home" || !pickupMeetingPoint);
+  const needsDeliveryNote = Boolean(delivery) && (delivery === "home" || !deliveryMeetingPoint);
+
+  const showFieldError = (field: FormField, message: string) => {
+    setInvalidField(field);
+    setError(message);
+    const element = document.getElementById(`request-${field}`);
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (element instanceof HTMLInputElement) element.focus({ preventScroll: true });
+  };
+  const clearFieldError = (field: FormField) => {
+    if (invalidField !== field) return;
+    setInvalidField(null);
+    setError("");
+  };
 
   const openDeclaration = async () => {
     setError("");
+    setInvalidField(null);
     const travelPlanId = traveller.travelPlanId || traveller.id;
     const travelerUserId = traveller.travelerUserId || traveller.travelerId || traveller.userId || traveller.user?.id;
     let profile: { id?: string; userId?: string; name?: string } = {};
@@ -263,20 +312,32 @@ export default function TravellerRequestPage() {
       setError("This trip is no longer accepting new requests.");
       return;
     }
-    if (!category || !pickup || !delivery) {
-      setError("Choose a package category, pickup, and delivery option.");
-      return;
-    }
     if (!(ratePerKg > 0)) {
       setError("This trip's price isn't available right now. Please try again.");
       return;
     }
     if (!Number.isFinite(numericWeight) || numericWeight < 0.1 || numericWeight > maxWeight) {
-      setError(`Weight must be between 0.1 and ${maxWeight} kg.`);
+      showFieldError("weight", `Weight must be between 0.1 and ${maxWeight} kg.`);
       return;
     }
     if (!Number.isInteger(numericPackageCount) || numericPackageCount < 1 || numericPackageCount > maxPackages) {
-      setError(`Package count must be between 1 and ${maxPackages}.`);
+      showFieldError("packageCount", `Package count must be between 1 and ${maxPackages}.`);
+      return;
+    }
+    if (!pickup) {
+      showFieldError("pickup", "Choose a pickup option.");
+      return;
+    }
+    if (needsPickupNote && !pickupNote.trim()) {
+      showFieldError("pickupNote", pickup === "home" ? "Add your pickup address." : "Add the pickup meeting point.");
+      return;
+    }
+    if (!delivery) {
+      showFieldError("delivery", "Choose a delivery option.");
+      return;
+    }
+    if (needsDeliveryNote && !deliveryNote.trim()) {
+      showFieldError("deliveryNote", delivery === "home" ? "Add the receiver's delivery address." : "Add the delivery meeting point.");
       return;
     }
     const blockingRequest = await findBlockingRequest(travelPlanId);
@@ -317,25 +378,23 @@ export default function TravellerRequestPage() {
           estimatedWeightKg: numericWeight,
           packageCount: Math.max(1, numericPackageCount),
           pickupOption: pickupOptions.find((o) => o.key === pickup)?.value || pickup,
-          pickupNote: pickupNote || undefined,
+          pickupNote: pickupNote.trim() || undefined,
           deliveryOption: deliveryOptions.find((o) => o.key === delivery)?.value || delivery,
-          deliveryNote: deliveryNote || undefined,
+          deliveryNote: deliveryNote.trim() || undefined,
           note: message || undefined,
           safetyDeclaration,
         }),
       });
       const matchId = createdMatch.id || createdMatch.data?.id;
-      if (parcelImages.length && matchId) {
-        const uploadRequests = await apiRequest<Array<{ fileId?: string; uploadUrl?: string; error?: string }>>("/v1/files/upload-urls", {
-          method: "POST",
-          body: JSON.stringify({
-            files: parcelImages.map((file) => ({ fileType: "parcel_image", contentType: file.type, metadata: { parcelMatchId: matchId } })),
-          }),
-        });
-        for (const [index, upload] of uploadRequests.entries()) {
-          if (!upload.uploadUrl || !upload.fileId) throw new Error(upload.error || "Could not prepare an image upload.");
-          const uploadResponse = await fetch(upload.uploadUrl, { method: "PUT", headers: { "Content-Type": parcelImages[index].type }, body: parcelImages[index] });
-          if (!uploadResponse.ok) throw new Error("Could not upload one of the parcel images.");
+      // The request already exists at this point, so a failed file must not fail the whole send
+      // (a resend would hit the duplicate-request guard); the request page can add it again.
+      if (parcelMedia.length && matchId) {
+        try {
+          const outcomes = await uploadParcelImages(matchId, parcelMedia);
+          const failed = outcomes.filter((outcome) => !("fileId" in outcome) || outcome.status.status !== "READY").length;
+          if (failed) setUploadWarning(`${failed} of ${parcelMedia.length} files couldn't be uploaded. You can add them from the request page.`);
+        } catch {
+          setUploadWarning("Your files couldn't be uploaded. You can add them from the request page.");
         }
       }
       window.sessionStorage.removeItem("trickle.web.selectedTraveller");
@@ -343,7 +402,9 @@ export default function TravellerRequestPage() {
     } catch (requestError) {
       const status = (requestError as { status?: number })?.status;
       const messageText = requestError instanceof Error ? requestError.message : "Could not send the pickup request.";
-      setError(status === 409 && /not accepting|full/i.test(messageText) ? "This trip is no longer accepting new requests." : messageText);
+      if (/pickupNote/.test(messageText)) showFieldError("pickupNote", "Add the pickup address or meeting point.");
+      else if (/deliveryNote/.test(messageText)) showFieldError("deliveryNote", "Add the delivery address or meeting point.");
+      else setError(status === 409 && /not accepting|full/i.test(messageText) ? "This trip is no longer accepting new requests." : messageText);
     } finally {
       setSubmitting(false);
     }
@@ -393,6 +454,7 @@ export default function TravellerRequestPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#285c59]">Request sent</p>
                 <h2 className="mt-2 text-2xl font-semibold text-[#183b3a]">Your request is with {travellerName}.</h2>
                 <p className="mt-3 text-sm leading-6 text-[#62645f]">You can follow the request from your Requests tab while the traveller reviews it.</p>
+                {uploadWarning && <p role="alert" className="mt-3 text-sm text-[#b33e2c]">{uploadWarning}</p>}
                 <button type="button" onClick={() => router.push("/requests")} className="mt-6 rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#285c59]">
                   View my requests
                 </button>
@@ -473,7 +535,10 @@ export default function TravellerRequestPage() {
                 </div>
 
                 <div>
-                  <p className={labelClass}>Category</p>
+                  <p className={labelClass}>
+                    Category
+                    <Required />
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {CATEGORIES.map((item) => (
                       <button
@@ -501,12 +566,29 @@ export default function TravellerRequestPage() {
                 <div className="grid gap-5 sm:grid-cols-2">
                   <label className={labelClass}>
                     Weight (kg)
-                    <input type="number" min={0.1} max={maxWeight} step="any" value={weight} onChange={(event) => setWeight(event.target.value)} className={inputClass} />
+                    <Required />
+                    <input
+                      id="request-weight"
+                      type="number"
+                      min={0.1}
+                      max={maxWeight}
+                      step="any"
+                      value={weight}
+                      aria-invalid={invalidField === "weight"}
+                      onChange={(event) => {
+                        setWeight(event.target.value);
+                        clearFieldError("weight");
+                      }}
+                      className={`${inputClass} ${invalidRing(invalidField === "weight")}`}
+                    />
                   </label>
                   <label className={labelClass}>
                     Package count
+                    <Required />
                     <span className="ml-2 text-xs font-normal text-[#8a8579]">1 to {maxPackages}</span>
                     <input
+                      id="request-packageCount"
+                      aria-invalid={invalidField === "packageCount"}
                       type="number"
                       min={1}
                       max={maxPackages}
@@ -520,21 +602,28 @@ export default function TravellerRequestPage() {
                         }
                         const nextCount = Number(value);
                         setPackageCount(Number.isInteger(nextCount) && nextCount >= 1 ? String(nextCount) : "1");
+                        clearFieldError("packageCount");
                       }}
-                      className={inputClass}
+                      className={`${inputClass} ${invalidRing(invalidField === "packageCount")}`}
                     />
                   </label>
                 </div>
 
                 <div>
-                  <p className={labelClass}>Pickup</p>
+                  <p className={labelClass}>
+                    Pickup
+                    <Required />
+                  </p>
                   {pickupOptions.length ? (
-                    <div className="mt-2 space-y-2">
+                    <div id="request-pickup" className={`mt-2 space-y-2 rounded-xl ${invalidRing(invalidField === "pickup")}`}>
                       {pickupOptions.map((option) => (
                         <button
                           key={option.key}
                           type="button"
-                          onClick={() => setPickup(option.key)}
+                          onClick={() => {
+                            setPickup(option.key);
+                            clearFieldError("pickup");
+                          }}
                           className={`block w-full rounded-xl border p-3 text-left ${pickup === option.key ? "border-[#e85b43] bg-[#fff0eb]" : "border-[#d7d2c9] bg-white"}`}
                         >
                           <p className="text-sm font-semibold text-[#183b3a]">{option.label}</p>
@@ -545,14 +634,29 @@ export default function TravellerRequestPage() {
                   ) : (
                     <p className="mt-2 text-sm text-[#62645f]">This trip has not specified pickup options.</p>
                   )}
-                  {pickup === "point" && (
+                  {pickup && !needsPickupNote && (
+                    <p className="mt-2 rounded-xl border border-[#b7e4d4] bg-[#e1f5ee] px-4 py-3 text-sm text-[#085041]">
+                      <span className="block text-xs text-[#0f6e56]">Meeting point set by the traveller</span>
+                      {pickupMeetingPoint}
+                    </p>
+                  )}
+                  {needsPickupNote && (
                     <div className="mt-2">
+                      <label htmlFor="request-pickupNote" className="mb-1 block text-xs font-semibold text-[#183b3a]">
+                        {pickup === "home" ? "Your pickup address" : "Pickup meeting point"}
+                        <Required />
+                      </label>
                       <div className="flex flex-wrap items-center gap-2">
                         <input
+                          id="request-pickupNote"
                           value={pickupNote}
-                          onChange={(event) => setPickupNote(event.target.value)}
-                          placeholder="Suggest a meeting point (optional)"
-                          className="min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
+                          aria-invalid={invalidField === "pickupNote"}
+                          onChange={(event) => {
+                            setPickupNote(event.target.value);
+                            clearFieldError("pickupNote");
+                          }}
+                          placeholder={pickup === "home" ? "House, street, area, city" : "Station, landmark, or place to meet"}
+                          className={`min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43] ${invalidRing(invalidField === "pickupNote")}`}
                         />
                         <button
                           type="button"
@@ -566,6 +670,7 @@ export default function TravellerRequestPage() {
                         <SavedAddressPicker
                           onSelect={(address) => {
                             setPickupNote(address);
+                            clearFieldError("pickupNote");
                             setShowPickupPicker(false);
                           }}
                         />
@@ -575,14 +680,20 @@ export default function TravellerRequestPage() {
                 </div>
 
                 <div>
-                  <p className={labelClass}>Delivery</p>
+                  <p className={labelClass}>
+                    Delivery
+                    <Required />
+                  </p>
                   {deliveryOptions.length ? (
-                    <div className="mt-2 space-y-2">
+                    <div id="request-delivery" className={`mt-2 space-y-2 rounded-xl ${invalidRing(invalidField === "delivery")}`}>
                       {deliveryOptions.map((option) => (
                         <button
                           key={option.key}
                           type="button"
-                          onClick={() => setDelivery(option.key)}
+                          onClick={() => {
+                            setDelivery(option.key);
+                            clearFieldError("delivery");
+                          }}
                           className={`block w-full rounded-xl border p-3 text-left ${delivery === option.key ? "border-[#e85b43] bg-[#fff0eb]" : "border-[#d7d2c9] bg-white"}`}
                         >
                           <p className="text-sm font-semibold text-[#183b3a]">{option.label}</p>
@@ -593,14 +704,29 @@ export default function TravellerRequestPage() {
                   ) : (
                     <p className="mt-2 text-sm text-[#62645f]">This trip has not specified delivery options.</p>
                   )}
-                  {delivery === "point" && (
+                  {delivery && !needsDeliveryNote && (
+                    <p className="mt-2 rounded-xl border border-[#b7e4d4] bg-[#e1f5ee] px-4 py-3 text-sm text-[#085041]">
+                      <span className="block text-xs text-[#0f6e56]">Meeting point set by the traveller</span>
+                      {deliveryMeetingPoint}
+                    </p>
+                  )}
+                  {needsDeliveryNote && (
                     <div className="mt-2">
+                      <label htmlFor="request-deliveryNote" className="mb-1 block text-xs font-semibold text-[#183b3a]">
+                        {delivery === "home" ? "Receiver's delivery address" : "Delivery meeting point"}
+                        <Required />
+                      </label>
                       <div className="flex flex-wrap items-center gap-2">
                         <input
+                          id="request-deliveryNote"
                           value={deliveryNote}
-                          onChange={(event) => setDeliveryNote(event.target.value)}
-                          placeholder="Suggest a meeting point (optional)"
-                          className="min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43]"
+                          aria-invalid={invalidField === "deliveryNote"}
+                          onChange={(event) => {
+                            setDeliveryNote(event.target.value);
+                            clearFieldError("deliveryNote");
+                          }}
+                          placeholder={delivery === "home" ? "House, street, area, city" : "Station, landmark, or place to meet"}
+                          className={`min-w-0 flex-1 rounded-xl border border-[#d7d2c9] bg-white px-4 py-3 text-sm outline-none focus:border-[#e85b43] ${invalidRing(invalidField === "deliveryNote")}`}
                         />
                         <button
                           type="button"
@@ -614,6 +740,7 @@ export default function TravellerRequestPage() {
                         <SavedAddressPicker
                           onSelect={(address) => {
                             setDeliveryNote(address);
+                            clearFieldError("deliveryNote");
                             setShowDeliveryPicker(false);
                           }}
                         />
@@ -638,27 +765,37 @@ export default function TravellerRequestPage() {
                 </label>
 
                 <div className="block text-sm font-semibold text-[#183b3a]">
-                  <span>Item photos</span>
-                  <span className="mt-1 block text-xs font-normal leading-5 text-[#62645f]">Optional. Add up to {MAX_PHOTOS} JPG, PNG, or WebP images, 1 MB each.</span>
+                  <span>Item photos &amp; videos</span>
+                  <span className="mt-1 block text-xs font-normal leading-5 text-[#62645f]">
+                    Optional. Add up to {MAX_PARCEL_MEDIA} files.
+                    <br />
+                    Photos: JPG, PNG, or WebP — 1MB max each.
+                    <br />
+                    Videos: MP4, MOV, or WebM — 50MB max each (about 30 seconds).
+                  </span>
                   <input
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept={[...PARCEL_IMAGE_TYPES, ...PARCEL_VIDEO_TYPES].join(",")}
                     multiple
                     onChange={(event) => {
-                      addParcelImages(event.target.files);
+                      addParcelMedia(event.target.files);
                       event.target.value = "";
                     }}
                     className="mt-3 block w-full rounded-xl border border-dashed border-[#d7d2c9] bg-white px-4 py-3 text-sm font-normal text-[#62645f] file:mr-4 file:rounded-lg file:border-0 file:bg-[#e5f0eb] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#285c59]"
                   />
-                  {parcelImages.length > 0 && (
+                  {parcelMedia.length > 0 && (
                     <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-5">
-                      {parcelImages.map((file, index) => (
+                      {parcelMedia.map((file, index) => (
                         <div key={`${file.name}-${file.lastModified}`} className="relative aspect-square overflow-hidden rounded-lg bg-[#e5f0eb]">
-                          <img src={URL.createObjectURL(file)} alt={`Parcel item ${index + 1}`} className="size-full object-cover" />
+                          {PARCEL_VIDEO_TYPES.includes(file.type) ? (
+                            <video src={URL.createObjectURL(file)} muted playsInline preload="metadata" aria-label={`Parcel video ${index + 1}`} className="size-full object-cover" />
+                          ) : (
+                            <img src={URL.createObjectURL(file)} alt={`Parcel item ${index + 1}`} className="size-full object-cover" />
+                          )}
                           <button
                             type="button"
-                            aria-label={`Remove image ${index + 1}`}
-                            onClick={() => setParcelImages((current) => current.filter((_, imageIndex) => imageIndex !== index))}
+                            aria-label={`Remove file ${index + 1}`}
+                            onClick={() => setParcelMedia((current) => current.filter((_, fileIndex) => fileIndex !== index))}
                             className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-[#183b3a] text-sm text-white"
                           >
                             ×

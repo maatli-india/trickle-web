@@ -21,6 +21,8 @@ export function ParcelPhotoGallery({
 }) {
   const [orderedIds, setOrderedIds] = useState<string[]>(imageIds);
   const [urls, setUrls] = useState<Record<string, string | null>>({});
+  // The file id carries no content type, so a URL that fails as an image is retried as a video.
+  const [videoIds, setVideoIds] = useState<Set<string>>(() => new Set());
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -116,9 +118,16 @@ export function ParcelPhotoGallery({
             const url = urls[id];
             return (
               <div key={id} className="relative aspect-square overflow-hidden rounded-xl border border-[#e4ded2] bg-[#f0ece3]">
-                {url ? (
+                {url && videoIds.has(id) ? (
+                  <video src={url} controls playsInline preload="metadata" aria-label="Parcel video" className="size-full object-cover" />
+                ) : url ? (
                   // eslint-disable-next-line @next/next/no-img-element -- external, per-request presigned URL; next/image can't proxy this
-                  <img src={url} alt="Parcel photo" className="size-full object-cover" />
+                  <img
+                    src={url}
+                    alt="Parcel photo"
+                    className="size-full object-cover"
+                    onError={() => setVideoIds((current) => new Set(current).add(id))}
+                  />
                 ) : (
                   <div className="flex size-full items-center justify-center text-center text-xs text-[#8a8579]">
                     {url === null ? "Unavailable" : "Loading..."}

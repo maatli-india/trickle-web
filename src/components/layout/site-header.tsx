@@ -103,7 +103,7 @@ export function SiteHeader() {
         )}
         {authenticated ? (
           <button type="button" onClick={() => setMenuOpen(true)} className="flex items-center gap-3 rounded-full border border-[#ded8ce] bg-[#fbfaf7] py-1.5 pl-1.5 pr-4 text-left transition hover:border-[#e85b43]" aria-label="Open account menu">
-            <Avatar userId={profileUserId} name={displayName} className="size-9" />
+            <Avatar userId={profileUserId} name={displayName} className="size-9" fresh={pathname === "/"} />
             <span className="hidden max-w-32 truncate text-sm font-semibold text-[#183b3a] sm:block">{displayName}</span>
             <span className="text-xs text-[#e85b43]" aria-hidden="true">▼</span>
           </button>

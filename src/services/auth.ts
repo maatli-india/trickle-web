@@ -5,6 +5,7 @@ const ACCESS_TOKEN_KEY = "trickle.web.accessToken";
 const REFRESH_TOKEN_KEY = "trickle.web.refreshToken";
 const PROFILE_KEY = "trickle.web.profile";
 const LEGACY_RECENT_SEARCHES_KEY = "trickle.web.recentParcelSearches";
+export const AVATAR_CACHE_PREFIX = "trickle.web.avatar.";
 
 const createDeviceId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -59,6 +60,9 @@ export const clearWebSession = () => {
   window.localStorage.removeItem(REFRESH_TOKEN_KEY);
   window.localStorage.removeItem(PROFILE_KEY);
   window.localStorage.removeItem(LEGACY_RECENT_SEARCHES_KEY);
+  Object.keys(window.localStorage)
+    .filter((key) => key.startsWith(AVATAR_CACHE_PREFIX))
+    .forEach((key) => window.localStorage.removeItem(key));
 };
 
 export const logoutWebSession = async () => {

@@ -10,7 +10,14 @@ export const CATEGORIES: { key: string; label: string }[] = [
   { key: "electronics", label: "Electronics" },
 ];
 
-export const MAX_PHOTOS = 5;
+// Kosh's parcel_image allowedMimeTypes must list every type below, or that file fails to upload.
+export const MAX_PARCEL_MEDIA = 15;
+export const PARCEL_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+// video/quicktime is the iPhone camera's .mov; video/webm is a browser/desktop screen recording.
+export const PARCEL_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+export const MAX_PARCEL_IMAGE_BYTES = 1024 * 1024;
+// ~20–50 s of 1080p phone video; longer or 4K clips must be trimmed before upload.
+export const MAX_PARCEL_VIDEO_BYTES = 50 * 1024 * 1024;
 
 // `key` is the UI selection key, `value` is the backend API enum sent as
 // pickupOption/deliveryOption (e.g. "door_pickup", "public_place").

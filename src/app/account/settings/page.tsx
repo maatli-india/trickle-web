@@ -1,13 +1,23 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { ExternalLink, ShieldCheck } from "lucide-react";
 import { AccountPage } from "@/components/account/account-page";
 import { Avatar } from "@/components/ui/avatar";
 import { apiRequest } from "@/services/api-client";
 import { buildDeviceDetails, getWebProfile, getWebUserId } from "@/services/auth";
-import { deleteMyProfilePic, invalidateAvatarCache, uploadProfilePic, waitForAvatarUrl } from "@/services/files";
+import { deleteMyProfilePic, invalidateAvatarCache, notifyAvatarChanged, uploadProfilePic, waitForAvatarUrl } from "@/services/files";
 import { startDigilockerVerification } from "@/services/digilocker";
+
+// The API stores dob as DD-MM-YYYY (validated with Go layout 02-01-2006); <input type="date"> only takes YYYY-MM-DD.
+const toInputDate = (apiDate: string) => {
+  const match = apiDate.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : /^\d{4}-\d{2}-\d{2}$/.test(apiDate) ? apiDate : "";
+};
+const toApiDate = (inputDate: string) => {
+  const [year, month, day] = inputDate.split("-");
+  return inputDate ? `${day}-${month}-${year}` : "";
+};
 
 type NotificationPreferences = { pushEnabled?: boolean; emailUpdatesEnabled?: boolean };
 type Profile = { name: string; email: string; phone: string; phoneExt: string; gender: string; dob: string; verified?: boolean; notificationPreferences: NotificationPreferences };
@@ -30,7 +40,7 @@ export default function AccountSettingsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const userId = getWebUserId();
-  const [avatarRefreshKey, setAvatarRefreshKey] = useState(0);
+  const [photoExpanded, setPhotoExpanded] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoStatus, setPhotoStatus] = useState("");
   const [photoError, setPhotoError] = useState("");
@@ -58,8 +68,8 @@ export default function AccountSettingsPage() {
       if (userId) {
         invalidateAvatarCache(userId);
         await waitForAvatarUrl(userId);
+        notifyAvatarChanged(userId);
       }
-      setAvatarRefreshKey((key) => key + 1);
     } catch (requestError) {
       setPhotoError(requestError instanceof Error ? requestError.message : "Could not upload your photo.");
     } finally {
@@ -71,40 +81,55 @@ export default function AccountSettingsPage() {
   const removePhoto = async () => {
     setPhotoBusy(true);
     setPhotoError("");
+    const refreshAvatar = () => {
+      if (!userId) return;
+      invalidateAvatarCache(userId);
+      notifyAvatarChanged(userId);
+    };
     try {
       await deleteMyProfilePic();
-      if (userId) invalidateAvatarCache(userId);
-      setAvatarRefreshKey((key) => key + 1);
+      refreshAvatar();
+      setPhotoExpanded(false);
     } catch (requestError) {
       const status = (requestError as { status?: number })?.status;
-      if (status === 404) setAvatarRefreshKey((key) => key + 1);
+      if (status === 404) refreshAvatar();
       else setPhotoError(requestError instanceof Error ? requestError.message : "Could not remove your photo.");
     } finally {
       setPhotoBusy(false);
     }
   };
 
-  // A full-page redirect to DigiLocker's own site (never an embedded
-  // iframe — same RFC 8252 "no embedded user-agent" reasoning the mobile
-  // app follows with the system browser). The backend's callback 302s back
-  // to /account/verify/result?status=...&reason=..., which is its own page
-  // below, not handled here.
+  const loadProfile = () =>
+    apiRequest<Profile>("/v1/users/me").then((response) =>
+      setProfile((current) => ({ ...current, ...response, notificationPreferences: { ...current.notificationPreferences, ...response.notificationPreferences } })),
+    );
+
+  // DigiLocker's own site in a new tab (never an embedded iframe — same
+  // RFC 8252 "no embedded user-agent" reasoning the mobile app follows with
+  // the system browser). The backend's callback 302s that tab to
+  // /account/verify/result; this tab re-reads the profile when the user comes back.
+  // The tab is opened synchronously in the click: opening it after the await is a popup and gets blocked.
   const startVerification = async () => {
+    const verificationTab = window.open("", "_blank");
+    if (verificationTab) verificationTab.opener = null;
     setVerifying(true);
     setVerifyError("");
     try {
       const { authorizeUrl } = await startDigilockerVerification();
       if (!authorizeUrl) throw new Error("DigiLocker verification is not available right now.");
-      window.location.href = authorizeUrl;
+      if (verificationTab) verificationTab.location.href = authorizeUrl;
+      else window.location.href = authorizeUrl;
+      window.addEventListener("focus", () => loadProfile().catch(() => undefined), { once: true });
     } catch (requestError) {
+      verificationTab?.close();
       setVerifyError(requestError instanceof Error ? requestError.message : "DigiLocker verification could not be started. Please try again.");
+    } finally {
       setVerifying(false);
     }
   };
 
   useEffect(() => {
-    apiRequest<Profile>("/v1/users/me")
-      .then((response) => setProfile((current) => ({ ...current, ...response, notificationPreferences: { ...current.notificationPreferences, ...response.notificationPreferences } })))
+    loadProfile()
       .catch(() => setError("We could not load your latest account details. Showing the saved profile instead."))
       .finally(() => setLoading(false));
   }, []);
@@ -133,18 +158,32 @@ export default function AccountSettingsPage() {
         <div className="h-[3px] bg-[#e85b43]" />
         <div className="space-y-8 p-6 sm:p-10">
           <div>
-            <h2 className="text-lg font-semibold tracking-[-0.01em] text-[#183b3a]">Profile photo</h2>
-            <p className="mt-1 text-sm text-[#8a8579]">Shown to travelers and senders you&apos;re matched with.</p>
-            <div className="mt-5 flex items-center gap-4">
-              <Avatar userId={userId} name={profile.name} className="size-16" refreshKey={avatarRefreshKey} />
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={pickPhoto} disabled={photoBusy} className="rounded-xl border border-[#d7d2c9] bg-white px-4 py-2.5 text-sm font-semibold text-[#183b3a] hover:border-[#e85b43] disabled:opacity-60">
-                  {photoBusy ? (photoStatus || "Working...") : "Change photo"}
-                </button>
-                <button type="button" onClick={removePhoto} disabled={photoBusy} className="rounded-xl border border-[#d7d2c9] bg-white px-4 py-2.5 text-sm font-semibold text-[#b33e2c] hover:border-[#e85b43] disabled:opacity-60">
-                  Remove
-                </button>
-                <input ref={photoInputRef} type="file" accept="image/*" onChange={uploadPhoto} className="hidden" />
+            {/* Same two-column structure in both states; only the photo's size transitions, so a toggle never reflows in a jump. */}
+            <div className="flex items-start gap-5 sm:gap-7">
+              <button
+                type="button"
+                onClick={() => setPhotoExpanded((expanded) => !expanded)}
+                aria-expanded={photoExpanded}
+                aria-label={photoExpanded ? "Show smaller photo" : "View larger photo"}
+                title={photoExpanded ? "Show smaller photo" : "View larger photo"}
+                className={`flex shrink-0 rounded-full ring-offset-2 transition-[width,height,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:ring-2 hover:ring-[#e85b43]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e85b43] motion-reduce:transition-none ${
+                  photoExpanded ? "size-32 cursor-zoom-out shadow-[0_16px_32px_-18px_rgba(24,59,58,0.45)] sm:size-44" : "size-20 cursor-zoom-in"
+                }`}
+              >
+                <Avatar userId={userId} name={profile.name} className="size-full" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-semibold tracking-[-0.01em] text-[#183b3a]">Profile photo</h2>
+                <p className="mt-1 text-sm text-[#8a8579]">Shown to travelers and senders you&apos;re matched with.</p>
+                <div className="mt-4 inline-flex flex-col gap-2">
+                  <button type="button" onClick={pickPhoto} disabled={photoBusy} className="cursor-pointer rounded-xl border border-[#d7d2c9] bg-white px-4 py-2.5 text-sm font-semibold text-[#183b3a] hover:border-[#e85b43] disabled:cursor-default disabled:opacity-60">
+                    {photoBusy ? (photoStatus || "Working...") : "Change photo"}
+                  </button>
+                  <button type="button" onClick={removePhoto} disabled={photoBusy} className="cursor-pointer rounded-xl border border-[#d7d2c9] bg-white px-4 py-2.5 text-sm font-semibold text-[#b33e2c] hover:border-[#e85b43] disabled:cursor-default disabled:opacity-60">
+                    Remove
+                  </button>
+                  <input ref={photoInputRef} type="file" accept="image/*" onChange={uploadPhoto} className="hidden" />
+                </div>
               </div>
             </div>
             {photoError && <p role="alert" className="mt-3 text-sm text-[#b33e2c]">{photoError}</p>}
@@ -169,7 +208,7 @@ export default function AccountSettingsPage() {
                 </label>
                 <label className="block text-sm font-semibold text-[#183b3a]">
                   Date of birth {!profile.dob && <span className="font-normal text-[#8a8579]">(optional, but needed to verify your identity)</span>}
-                  <input type="date" value={profile.dob} disabled={Boolean(profile.dob)} onChange={(event) => setProfile({ ...profile, dob: event.target.value })} className={inputClass} />
+                  <input type="date" value={toInputDate(profile.dob)} disabled={Boolean(profile.dob)} onChange={(event) => setProfile({ ...profile, dob: toApiDate(event.target.value) })} className={inputClass} />
                 </label>
               </div>
               <p className="rounded-xl border border-[#e4ded2] bg-[#fbfaf7] px-4 py-3 text-xs leading-5 text-[#8a8579]">
@@ -196,9 +235,11 @@ export default function AccountSettingsPage() {
                   type="button"
                   onClick={startVerification}
                   disabled={verifying}
-                  className="mt-4 rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#285c59] disabled:opacity-60"
+                  aria-label="Verify with DigiLocker (opens in a new tab)"
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#183b3a] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#285c59] disabled:opacity-60"
                 >
-                  {verifying ? "Redirecting to DigiLocker..." : "Verify with DigiLocker"}
+                  {verifying ? "Opening DigiLocker..." : "Verify with DigiLocker"}
+                  <ExternalLink size={15} aria-hidden="true" />
                 </button>
                 {verifyError && <p role="alert" className="mt-3 text-sm text-[#b33e2c]">{verifyError}</p>}
               </>

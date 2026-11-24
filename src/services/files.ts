@@ -1,4 +1,5 @@
 import { apiRequest, apiRequestWithAuth } from "@/services/api-client";
+import { AVATAR_CACHE_PREFIX, getWebUserId } from "@/services/auth";
 
 export type UploadTarget = {
   fileId: string;
@@ -111,7 +112,39 @@ export const fetchChatFileUrl = async (chatId: string, fileId: string): Promise<
   }
 };
 
-const AVATAR_CACHE_PREFIX = "trickle.web.avatar.";
+type CachedAvatar = { url: string | null; expiresAt: number };
+
+// Re-fetch this long before the presigned URL expires, so an <img> never gets a dead link.
+const AVATAR_EXPIRY_MARGIN_MS = 60_000;
+const AVATAR_FALLBACK_TTL_MS = 10 * 60_000;
+const avatarRequests = new Map<string, Promise<string | null>>();
+
+// The signed-in user's own picture survives tabs and reloads (localStorage, cleared on logout);
+// other users' pictures only live for this tab (sessionStorage).
+const avatarStorage = (userId: string) => (userId === getWebUserId() ? localStorage : sessionStorage);
+
+// The URL is an S3 presigned GET; it stops working at X-Amz-Date + X-Amz-Expires (minus the margin).
+export const presignedExpiry = (url: string): number => {
+  try {
+    const params = new URL(url).searchParams;
+    const signedAt = params.get("X-Amz-Date")?.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+    const lifetimeSeconds = Number(params.get("X-Amz-Expires"));
+    if (!signedAt || !Number.isFinite(lifetimeSeconds)) return Date.now() + AVATAR_FALLBACK_TTL_MS;
+    const [, year, month, day, hour, minute, second] = signedAt.map(Number);
+    return Date.UTC(year, month - 1, day, hour, minute, second) + lifetimeSeconds * 1000 - AVATAR_EXPIRY_MARGIN_MS;
+  } catch {
+    return Date.now() + AVATAR_FALLBACK_TTL_MS;
+  }
+};
+
+const readCachedAvatar = (userId: string): CachedAvatar | null => {
+  try {
+    const cached = JSON.parse(avatarStorage(userId).getItem(`${AVATAR_CACHE_PREFIX}${userId}`) || "null") as CachedAvatar | null;
+    return cached && cached.expiresAt > Date.now() ? cached : null;
+  } catch {
+    return null;
+  }
+};
 
 // GET /users/{userId}/profile-pic-url is public but requires X-Device-ID
 // and redirects to the real image — a plain <img src> can't set that
@@ -119,26 +152,49 @@ const AVATAR_CACHE_PREFIX = "trickle.web.avatar.";
 // goes through our own /api/avatar/[userId] route, which resolves the
 // redirect server-side and hands back the final URL as JSON.
 //
-// The result is cached in sessionStorage so navigating between tabs
-// doesn't re-fetch. Call invalidateAvatarCache after upload/delete.
-export const fetchAvatarUrl = async (userId: string): Promise<string | null> => {
+// Cached until the presigned URL expires ("no picture" until the cache is
+// invalidated); `fresh` skips the cache. Concurrent calls share one request.
+export const fetchAvatarUrl = async (userId: string, { fresh = false }: { fresh?: boolean } = {}): Promise<string | null> => {
   if (typeof window === "undefined" || !userId) return null;
-  const cacheKey = `${AVATAR_CACHE_PREFIX}${userId}`;
-  const cached = sessionStorage.getItem(cacheKey);
-  if (cached) return cached === "none" ? null : cached;
-  try {
-    const result = await apiRequest<{ url?: string }>(`/avatar/${encodeURIComponent(userId)}`);
-    const url = result?.url || null;
-    sessionStorage.setItem(cacheKey, url || "none");
-    return url;
-  } catch {
-    return null;
+  if (!fresh) {
+    const cached = readCachedAvatar(userId);
+    if (cached) return cached.url;
   }
+  const pending = avatarRequests.get(userId);
+  if (pending) return pending;
+  const request = (async () => {
+    try {
+      const result = await apiRequest<{ url?: string }>(`/avatar/${encodeURIComponent(userId)}`);
+      const url = result?.url || null;
+      const entry: CachedAvatar = { url, expiresAt: url ? presignedExpiry(url) : Number.MAX_SAFE_INTEGER };
+      avatarStorage(userId).setItem(`${AVATAR_CACHE_PREFIX}${userId}`, JSON.stringify(entry));
+      return url;
+    } catch (error) {
+      if ((error as { status?: number })?.status === 404) {
+        const entry: CachedAvatar = { url: null, expiresAt: Number.MAX_SAFE_INTEGER };
+        avatarStorage(userId).setItem(`${AVATAR_CACHE_PREFIX}${userId}`, JSON.stringify(entry));
+      }
+      return null;
+    } finally {
+      avatarRequests.delete(userId);
+    }
+  })();
+  avatarRequests.set(userId, request);
+  return request;
+};
+
+// Lets every mounted <Avatar> of this user (page header included) re-read the cache after an upload/delete.
+export const AVATAR_CHANGED_EVENT = "trickle:avatar-changed";
+
+export const notifyAvatarChanged = (userId: string) => {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<string>(AVATAR_CHANGED_EVENT, { detail: userId }));
 };
 
 export const invalidateAvatarCache = (userId?: string) => {
   if (typeof window === "undefined") return;
   if (userId) {
+    localStorage.removeItem(`${AVATAR_CACHE_PREFIX}${userId}`);
     sessionStorage.removeItem(`${AVATAR_CACHE_PREFIX}${userId}`);
   } else {
     Object.keys(sessionStorage).filter((k) => k.startsWith(AVATAR_CACHE_PREFIX)).forEach((k) => sessionStorage.removeItem(k));
@@ -150,7 +206,7 @@ export const invalidateAvatarCache = (userId?: string) => {
 // times before giving up.
 export const waitForAvatarUrl = async (userId: string, attempts = 5, delayMs = 1200): Promise<string | null> => {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const url = await fetchAvatarUrl(userId);
+    const url = await fetchAvatarUrl(userId, { fresh: true });
     if (url) return url;
     if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
