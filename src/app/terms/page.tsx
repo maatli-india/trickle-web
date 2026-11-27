@@ -11,7 +11,7 @@ export default function TermsPage() {
     <LegalPage
       eyebrow="Trickle terms"
       title="Terms of Service"
-      updated="6 November 2026"
+      updated="27 November 2026"
       intro="These terms explain how Trickle works, what senders and travelers agree to do, and how payments, handoffs, cancellations, safety reports, and disputes are handled."
       sections={[
         { href: "#overview", label: "Overview" },
@@ -70,6 +70,7 @@ export default function TermsPage() {
         </LegalList>
         <p>We may refuse, cancel, hold, report, or remove a parcel or match when we believe it violates these Terms, creates a safety risk, or may expose users or Trickle to legal or financial harm.</p>
         <p>Trickle does not inspect, X-ray, or verify parcel contents and relies on the sender&rsquo;s accurate declaration. If a sender nonetheless includes an illegal, prohibited, or undeclared item in a parcel, the sender alone is responsible and liable for that item and any resulting consequences &mdash; not Trickle.</p>
+        <p><strong>Requests started from Thela.</strong> Thela, a street-food app run by the same company, can open Trickle from a food reel to show travellers going from that cart&rsquo;s town to yours. This only helps you find a traveler; Trickle and Thela do not buy, sell, prepare, pack or check the food, and the Thela vendor is not part of your Trickle request. Any arrangement for a traveler to buy or collect food is between you and the traveler and must follow these Terms, including the rule on perishable, temperature-sensitive and liquid goods above. A traveler may decline any request.</p>
       </LegalSection>
 
       <LegalSection id="identity" title="5. Identity and safety">
