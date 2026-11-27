@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Mail, Smartphone } from "lucide-react";
 import { TrickleLogo } from "@/components/layout/trickle-logo";
 import { appStoreUrl, playStoreUrl } from "@/lib/app-links";
+import { AdPreferencesLink } from "@/components/consent/ad-consent-banner";
 
 type FooterLink = { label: string; href: string };
 
@@ -104,6 +105,7 @@ export function SiteFooter() {
             <Link href="/terms" className="transition hover:text-[#e85b43]">Terms</Link>
             <Link href="/safety-disclaimer" className="transition hover:text-[#e85b43]">Safety</Link>
             <Link href="/community-guidelines" className="transition hover:text-[#e85b43]">Community guidelines</Link>
+            <AdPreferencesLink />
           </div>
         </div>
       </div>

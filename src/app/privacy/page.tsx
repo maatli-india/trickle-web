@@ -11,13 +11,14 @@ export default function PrivacyPolicyPage() {
     <LegalPage
       eyebrow="Trickle privacy"
       title="Privacy Policy"
-      updated="6 November 2026"
+      updated="27 November 2026"
       intro="This policy explains how Trickle handles information when you use our mobile app, website, and people-powered delivery services. We collect what we need to help a parcel follow the journey, keep users safe, and support payments and disputes."
       sections={[
         { href: "#overview", label: "Overview" },
         { href: "#information", label: "Information" },
         { href: "#use", label: "How we use it" },
         { href: "#sharing", label: "Sharing" },
+        { href: "#advertising", label: "Ads & analytics" },
         { href: "#consent", label: "Consent" },
         { href: "#biometric", label: "Face data (selfie check)" },
         { href: "#security", label: "Security" },
@@ -33,11 +34,12 @@ export default function PrivacyPolicyPage() {
       </LegalSection>
 
       <LegalSection id="information" title="2. Information we collect">
-        <p><strong>Account information:</strong> phone number, OTP verification records, name, email address, date of birth, gender where provided, profile photo, referral information, and identity-verification details. If you complete selfie-based photo verification, see <a className="font-semibold text-[#e85b43] underline" href="#biometric">Section 6</a> for exactly what that involves and why the selfie itself is never stored.</p>
+        <p><strong>Account information:</strong> phone number, OTP verification records, name, email address, date of birth, gender where provided, profile photo, referral information, and identity-verification details. If you complete selfie-based photo verification, see <a className="font-semibold text-[#e85b43] underline" href="#biometric">Section 7</a> for exactly what that involves and why the selfie itself is never stored.</p>
         <p><strong>Delivery information:</strong> parcel descriptions, pickup and drop locations, route coordinates, travel dates, delivery deadlines, parcel images or attachments, agreed prices, handoff confirmations, ratings, reports, and support history.</p>
         <p><strong>Messages and content:</strong> chat messages, attachments, shared location pins, reports, and other content you submit through the service.</p>
         <p><strong>Payment and payout information:</strong> payment status, transaction identifiers, refund information, payout status, and bank-account details needed for traveler payouts. Payment credentials are handled by our payment provider where possible.</p>
         <p><strong>Device and technical information:</strong> device model, operating system, app version, country, device identifiers, IP address, log data, crash information, and push-notification token.</p>
+        <p><strong>Usage and advertising information:</strong> how you use the app and website (for example screens viewed, an account created, a trip posted, a parcel request sent, or a payment completed), and advertising identifiers: the Android advertising ID, and on iPhone the advertising identifier (IDFA) only if you allow tracking. On our website, Google and Meta may set cookies or similar technologies. See <a className="font-semibold text-[#e85b43] underline" href="#advertising">Section 5</a>.</p>
         <p><strong>Location and address information:</strong> location or route information that you enter or choose, and device location when you grant permission for address suggestions or nearby traveler matching.</p>
         <p><strong>Support information:</strong> messages, attachments, contact details, and information needed to investigate a question, payment issue, safety report, or dispute.</p>
       </LegalSection>
@@ -51,6 +53,7 @@ export default function PrivacyPolicyPage() {
           <li>Verify identity, prevent fraud, investigate abuse, and protect users and parcels.</li>
           <li>Operate chat, file storage, customer support, ratings, reports, and dispute handling.</li>
           <li>Diagnose crashes, maintain reliability, measure service performance, and improve the product.</li>
+          <li>Understand how people find Trickle, measure whether our advertising works, and show Trickle ads on other services (see <a className="font-semibold text-[#e85b43] underline" href="#advertising">Section 5</a>).</li>
           <li>Meet legal, accounting, tax, regulatory, and law-enforcement obligations.</li>
         </LegalList>
         <p>We do not use deleted-account information for marketing, personalization, or product recommendations during the retention window.</p>
@@ -62,19 +65,41 @@ export default function PrivacyPolicyPage() {
           <li>Other Trickle users involved in the same parcel, travel plan, match, or conversation. We show only information needed for coordination and safety.</li>
           <li>Service providers for hosting, databases, file storage, email, SMS, push notifications, maps and address search, and customer support.</li>
           <li>PayU or another approved payment provider for physical delivery payments, refunds, and traveler payouts.</li>
+          <li>Advertising and analytics partners, Google and Meta, for app and website analytics, ad measurement, and advertising, limited to the information described in <a className="font-semibold text-[#e85b43] underline" href="#advertising">Section 5</a>.</li>
           <li>Professional advisers, insurers, authorities, or law enforcement when necessary for a dispute, safety incident, fraud investigation, legal claim, or legal obligation.</li>
           <li>A successor entity if Trickle is involved in a merger, acquisition, financing, or asset transfer, subject to appropriate confidentiality protections.</li>
         </LegalList>
-        <p>We do not sell personal information. We do not share personal information for third-party advertising tracking unless we first update this policy and obtain any consent required by law.</p>
+        <p>We do not sell personal information. The only information we share for advertising is the limited app and website activity described in Section 5.</p>
       </LegalSection>
 
-      <LegalSection id="consent" title="5. Consent and lawful processing">
+      <LegalSection id="advertising" title="5. Advertising, analytics, and measurement">
+        <p>We advertise Trickle on Google (including Search, YouTube, and Play) and on Meta (Facebook and Instagram). To understand how people find Trickle and whether those ads work, the app uses Google Firebase Analytics and the Meta SDK, and our website uses Google and Meta measurement tags.</p>
+        <p><strong>What these partners receive:</strong></p>
+        <LegalList>
+          <li>App and website events, such as installing or opening the app, creating an account, posting a trip, sending a parcel request, and completing a payment together with its amount in Indian rupees.</li>
+          <li>Device and technical information, such as device model, operating system, app version, IP address, and approximate location derived from the IP address.</li>
+          <li>Advertising identifiers: the Android advertising ID, and on iPhone the IDFA only if you allow tracking when asked. On our website, cookies or similar technologies set by Google and Meta.</li>
+        </LegalList>
+        <p><strong>What they do not receive:</strong> your name, phone number, email address, chat messages, parcel descriptions or photos, pickup or drop addresses, precise location, identity documents or DigiLocker data, selfies or face data, payment card details, or bank details.</p>
+        <p>Google and Meta use this information to measure ads, to show Trickle ads to people likely to find them useful, and for other purposes described in their own policies, and may combine it with information they already hold. See the <a className="font-semibold text-[#e85b43] underline" href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy</a> and the <a className="font-semibold text-[#e85b43] underline" href="https://www.facebook.com/privacy/policy" target="_blank" rel="noopener noreferrer">Meta Privacy Policy</a>.</p>
+        <p><strong>Your choices:</strong></p>
+        <LegalList>
+          <li>iPhone: choose &ldquo;Ask App Not to Track&rdquo; when the app asks, or change it any time in Settings &rarr; Privacy &amp; Security &rarr; Tracking.</li>
+          <li>Android: delete or reset your advertising ID in Settings &rarr; Google &rarr; Ads (the exact path varies by phone).</li>
+          <li>Ad preferences: <a className="font-semibold text-[#e85b43] underline" href="https://myadcenter.google.com" target="_blank" rel="noopener noreferrer">Google My Ad Center</a> and your Meta Accounts Center ad preferences.</li>
+          <li>In the Trickle app: Account &rarr; Ads &amp; measurement. Nothing is shared for advertising until you turn it on.</li>
+          <li>Website: choose &ldquo;Allow&rdquo; or &ldquo;No thanks&rdquo; when asked, change it any time with &ldquo;Ad preferences&rdquo; at the bottom of any page, or block cookies in your browser.</li>
+        </LegalList>
+        <p>Opting out does not change how Trickle works for you. We never use face data, identity documents, or chat content for advertising, and we do not direct advertising at children.</p>
+      </LegalSection>
+
+      <LegalSection id="consent" title="6. Consent and lawful processing">
         <p>We collect and use information on the legal basis that applies to the activity: performance of the service you request, your consent where a permission or optional feature requires it, our legitimate interests in security and service reliability, and legal obligations. We request consent before accessing device location, photos, camera, notifications, or other permission-controlled data where required by the platform or law.</p>
         <p>Some information is necessary to create an account, authenticate you, match a parcel, process a requested payment, investigate a safety report, or comply with law. If you do not provide required information, the relevant feature may not work. Optional information can be withheld without preventing unrelated features from working.</p>
         <p>We do not use a general acceptance of this policy as consent for unrelated purposes. Where sensitive identity-verification information is processed, we will provide the applicable provider notice and request the additional consent or authorization required for that verification flow.</p>
       </LegalSection>
 
-      <LegalSection id="biometric" title="6. Photo Verified badge (selfie check) and face data">
+      <LegalSection id="biometric" title="7. Photo Verified badge (selfie check) and face data">
         <p><strong>What it is.</strong> The optional &ldquo;Photo Verified&rdquo; badge shows other users that your profile photo is a real, recent photo of you. It only checks that a live selfie matches your profile photo. It does not verify your legal identity; identity verification is a separate, DigiLocker-based process.</p>
         <p><strong>What face data we collect.</strong> Only if you choose to start the check, we collect one live selfie taken with your front camera at that moment. We compare it with the profile photo already on your account. We do not collect face data from anyone else, from your photo library, or at any other time.</p>
         <p><strong>How it is used.</strong> The selfie is uploaded over an encrypted connection to our own secure file storage, which runs on Amazon Web Services (Amazon S3), and sent, together with your profile photo, to Amazon Web Services&rsquo; Rekognition service, which acts as our service provider. Rekognition checks that the selfie shows exactly one clear, unobscured face and returns a similarity score for the two photos. We use that score for one purpose only: to decide whether to show the Photo Verified badge on your profile. Face data is never used for advertising, tracking, profiling, identifying you to others, or training any model.</p>
@@ -84,30 +109,31 @@ export default function PrivacyPolicyPage() {
         <p><strong>Your choices.</strong> The check is optional. Declining it does not limit your account; it only means the badge is not shown. Deleting your account removes your Photo Verified status. Where a platform requires us to disclose face-data processing (for example, an app store&rsquo;s privacy questionnaire), this section is the authoritative description of that processing.</p>
       </LegalSection>
 
-      <LegalSection id="storage" title="7. What we store and who can access it">
+      <LegalSection id="storage" title="8. What we store and who can access it">
         <p>Trickle stores account and operational records in its backend systems, including profile information, authentication and device-session records, parcel and travel records, messages and attachments, support and safety records, payment status, provider transaction identifiers, and audit events. Raw card credentials are not intended to be stored by Trickle and are handled by the approved payment provider.</p>
         <p>Access is role-based and limited to the user, the other participants who need information for the relevant delivery or travel interaction, authorized Trickle support and safety personnel, approved service providers acting on our instructions, and authorities or advisers where legally permitted or required. Staff access should be logged, limited to business need, and removed when no longer required.</p>
-        <p>We do not sell personal information. We do not provide personal information to third parties for advertising tracking. Providers may process information only to deliver the contracted service and under their own applicable terms and privacy notices.</p>
+        <p>We do not sell personal information. Apart from the limited advertising and measurement information described in Section 5, we do not provide personal information to third parties for advertising. Providers may process information only to deliver the contracted service and under their own applicable terms and privacy notices.</p>
       </LegalSection>
 
-      <LegalSection id="security" title="8. Security and encryption">
+      <LegalSection id="security" title="9. Security and encryption">
         <p>Production network traffic is intended to use HTTPS/TLS. Authentication tokens and device-bound sessions are protected with server-side access controls, and active sessions can be revoked. Stored information should be protected with provider encryption at rest, least-privilege access, secret management, backups with controlled access, vulnerability management, and audit logging appropriate to the risk.</p>
         <p>Security is a shared responsibility. Keep your device updated, use a screen lock, do not share OTPs or passwords, and report suspicious activity promptly. No online service or transmission method can be guaranteed completely secure.</p>
       </LegalSection>
 
-      <LegalSection id="retention" title="9. Retention and deletion">
-        <p>Photo Verified selfies are not kept — see <a className="font-semibold text-[#e85b43] underline" href="#biometric">Section 6</a>. Each selfie is deleted as soon as its comparison finishes (or within two hours if the check is never completed), so there is nothing left to delete on account closure.</p>
+      <LegalSection id="retention" title="10. Retention and deletion">
+        <p>Photo Verified selfies are not kept — see <a className="font-semibold text-[#e85b43] underline" href="#biometric">Section 7</a>. Each selfie is deleted as soon as its comparison finishes (or within two hours if the check is never completed), so there is nothing left to delete on account closure.</p>
         <p>When you request account deletion, we immediately deactivate the account, revoke active sessions and notification tokens, anonymize direct profile identifiers, and purge user-owned profile files where possible.</p>
         <p>Operational records for payments, disputes, fraud and safety, tax and payouts, parcel requests and matches, travel plans, and chat are targeted for deletion or irreversible anonymization within 30 days after account deletion. The retention schedule is described in this section.</p>
         <p>Records under an active legal hold, dispute, fraud or safety investigation, or a longer legal or regulatory requirement may be retained for longer. We restrict those records to the relevant purpose and remove them when the hold or requirement ends.</p>
       </LegalSection>
 
-      <LegalSection id="rights" title="10. Your choices, withdrawal, and rights">
+      <LegalSection id="rights" title="11. Your choices, withdrawal, and rights">
         <LegalList>
           <li>Access or update information through Account Settings where the feature is available.</li>
           <li>Request account deletion from Account Settings or Support.</li>
           <li>Manage notification permission in the app and your device settings.</li>
           <li>Deny camera, photo, or location permissions and use an available manual fallback.</li>
+          <li>Opt out of advertising tracking as described in <a className="font-semibold text-[#e85b43] underline" href="#advertising">Section 5</a>: the iPhone tracking setting, your Android advertising ID, and Google&rsquo;s and Meta&rsquo;s ad preferences.</li>
           <li>Withdraw permission for optional device features through the app or device settings. Withdrawal does not affect processing already completed lawfully, and a feature may stop working afterward.</li>
           <li>Withdraw optional marketing or notification preferences where those controls are available. Transactional messages may still be sent when necessary for account security, delivery, payments, or support.</li>
           <li>Contact us to ask about access, correction, deletion, restriction, objection, or a copy of your information, subject to applicable law.</li>
@@ -116,25 +142,25 @@ export default function PrivacyPolicyPage() {
         <p>We may need to verify your identity before fulfilling a request. Some information may be retained or withheld where required to prevent fraud, protect another person, resolve a dispute, or comply with law.</p>
       </LegalSection>
 
-      <LegalSection id="incidents" title="11. Data breaches and security incidents">
+      <LegalSection id="incidents" title="12. Data breaches and security incidents">
         <p>We maintain an incident process for suspected unauthorized access, disclosure, loss, alteration, or destruction of personal information. The process includes containment, access preservation, technical investigation, risk assessment, remediation, and documentation. We will notify affected users, regulators, or other parties when required by applicable law and within the required timeframe, and will provide practical steps where appropriate.</p>
         <p>Report a suspected breach, account takeover, exposed personal information, or unsafe data disclosure to <a className="font-semibold text-[#e85b43] underline" href="mailto:support@trickle.org.in">support@trickle.org.in</a>. Do not include passwords, OTPs, full payment credentials, or identity-document numbers in email.</p>
       </LegalSection>
 
-      <LegalSection id="transfers" title="12. Security and international processing">
+      <LegalSection id="transfers" title="13. Security and international processing">
         <p>We use access controls, authentication, encryption in transit, session revocation, provider safeguards, and operational monitoring appropriate to the information we process. No internet service can guarantee absolute security, so please protect your device and never share an OTP.</p>
         <p>Trickle and its providers may process information in countries other than where you live. We use contractual, technical, or other safeguards required by applicable law for those transfers.</p>
       </LegalSection>
 
-      <LegalSection id="children" title="13. Children">
+      <LegalSection id="children" title="14. Children">
         <p>Trickle is intended for adults and is not directed to children. We do not knowingly collect personal information from children. Contact us if you believe a child has provided information so we can investigate and remove it where appropriate.</p>
       </LegalSection>
 
-      <LegalSection id="changes" title="14. Changes to this policy">
+      <LegalSection id="changes" title="15. Changes to this policy">
         <p>We may update this policy when our services, providers, or legal obligations change. We will update the date above and provide additional notice for material changes where required.</p>
       </LegalSection>
 
-      <LegalSection id="contact" title="15. Contact us">
+      <LegalSection id="contact" title="16. Contact us">
         <p>For privacy questions, rights requests, or account-deletion support, email <a className="font-semibold text-[#e85b43] underline" href="mailto:support@trickle.org.in">support@trickle.org.in</a>. Please include enough information for us to identify your account without sending an OTP or password.</p>
       </LegalSection>
     </LegalPage>

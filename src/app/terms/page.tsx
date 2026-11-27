@@ -11,7 +11,7 @@ export default function TermsPage() {
     <LegalPage
       eyebrow="Trickle terms"
       title="Terms of Service"
-      updated="6 November 2026"
+      updated="27 November 2026"
       intro="These terms explain how Trickle works, what senders and travelers agree to do, and how payments, handoffs, cancellations, safety reports, and disputes are handled."
       sections={[
         { href: "#overview", label: "Overview" },
@@ -116,6 +116,7 @@ export default function TermsPage() {
       <LegalSection id="availability" title="10. Availability and third parties">
         <p>We work to keep Trickle available and accurate, but routes, users, networks, maps, payment providers, storage providers, and notification systems can fail or change. We may modify, suspend, or discontinue features with reasonable notice where practical.</p>
         <p>Third-party services have their own terms and policies. Trickle is not responsible for a third party’s independent service, content, availability, or handling of information beyond our control.</p>
+        <p>We advertise Trickle on third-party platforms such as Google and Meta, and use their analytics and measurement tools in the app and on our website. What information this involves, and how to opt out, is explained in the <a className="font-semibold text-[#e85b43] underline" href="/privacy#advertising">Privacy Policy</a>.</p>
       </LegalSection>
 
       <LegalSection id="liability" title="11. Responsibility and limits">

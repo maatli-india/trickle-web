@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Poppins } from "next/font/google";
 import "./globals.css";
 import { PwaSetup } from "@/components/pwa-setup";
+import { AdConsentBanner } from "@/components/consent/ad-consent-banner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -51,6 +52,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         {children}
         <PwaSetup />
+        <AdConsentBanner />
       </body>
     </html>
   );
