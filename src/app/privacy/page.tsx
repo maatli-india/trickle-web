@@ -11,7 +11,7 @@ export default function PrivacyPolicyPage() {
     <LegalPage
       eyebrow="Trickle privacy"
       title="Privacy Policy"
-      updated="6 November 2026"
+      updated="27 November 2026"
       intro="This policy explains how Trickle handles information when you use our mobile app, website, and people-powered delivery services. We collect what we need to help a parcel follow the journey, keep users safe, and support payments and disputes."
       sections={[
         { href: "#overview", label: "Overview" },
@@ -39,6 +39,7 @@ export default function PrivacyPolicyPage() {
         <p><strong>Payment and payout information:</strong> payment status, transaction identifiers, refund information, payout status, and bank-account details needed for traveler payouts. Payment credentials are handled by our payment provider where possible.</p>
         <p><strong>Device and technical information:</strong> device model, operating system, app version, country, device identifiers, IP address, log data, crash information, and push-notification token.</p>
         <p><strong>Location and address information:</strong> location or route information that you enter or choose, and device location when you grant permission for address suggestions or nearby traveler matching.</p>
+        <p><strong>Requests started from Thela:</strong> Thela is a street-food app run by the same company as Trickle. If you tap <strong>Order Now Using Trickle</strong> on a Thela food reel, the Trickle app receives the food&rsquo;s name, the Thela vendor&rsquo;s first name and cart number, the cart&rsquo;s area, a reference to the reel, and two approximate positions (the cart&rsquo;s and your Thela drop point&rsquo;s, each rounded to about 11 km, never an address or exact pin). It never receives your Thela name, phone number or account. The app keeps these details on your phone for up to 24 hours, so it can show them after you sign in, and deletes them once shown. It sends the two approximate positions to our servers only to find travellers on that route and the names of the two towns, and fills in your request&rsquo;s description, which you can change before sending. On Android, if you installed Trickle from that button, the app reads the same details from the Google Play install referrer on your phone; it does not send the referrer to us.</p>
         <p><strong>Support information:</strong> messages, attachments, contact details, and information needed to investigate a question, payment issue, safety report, or dispute.</p>
       </LegalSection>
 
@@ -46,6 +47,7 @@ export default function PrivacyPolicyPage() {
         <LegalList>
           <li>Create and secure accounts using phone verification and session controls.</li>
           <li>Suggest routes, match parcel requests with travel plans, and coordinate handoffs.</li>
+          <li>Show travellers on the route and pre-fill your request when you start from a Thela food reel.</li>
           <li>Process delivery payments, refunds, traveler payouts, and payment support.</li>
           <li>Send transactional notifications about OTPs, requests, matches, payments, handoffs, and support.</li>
           <li>Verify identity, prevent fraud, investigate abuse, and protect users and parcels.</li>
